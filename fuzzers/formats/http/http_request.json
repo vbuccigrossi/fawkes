@@ -1,0 +1,42 @@
+{
+  "format_name": "http_request",
+  "fields": [
+    {
+      "name": "request_line",
+      "offset": 0,
+      "length": 64,
+      "type": "string"
+    },
+    {
+      "name": "host_header",
+      "offset": null,
+      "length": 64,
+      "type": "string"
+    },
+    {
+      "name": "content_length",
+      "offset": null,
+      "length": 16,
+      "type": "string",
+      "controls": "body"
+    },
+    {
+      "name": "user_agent",
+      "offset": null,
+      "length": 128,
+      "type": "string"
+    },
+    {
+      "name": "accept",
+      "offset": null,
+      "length": 64,
+      "type": "string"
+    },
+    {
+      "name": "body",
+      "offset": null,
+      "length_field": "content_length",
+      "type": "bytes"
+    }
+  ]
+}

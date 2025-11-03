@@ -1,0 +1,127 @@
+{
+  "format_name": "dhcp_ack",
+  "fields": [
+    {
+      "name": "op",
+      "offset": 0,
+      "length": 1,
+      "type": "uint8",
+      "value": 2
+    },
+    {
+      "name": "htype",
+      "offset": 1,
+      "length": 1,
+      "type": "uint8"
+    },
+    {
+      "name": "hlen",
+      "offset": 2,
+      "length": 1,
+      "type": "uint8"
+    },
+    {
+      "name": "hops",
+      "offset": 3,
+      "length": 1,
+      "type": "uint8"
+    },
+    {
+      "name": "xid",
+      "offset": 4,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "secs",
+      "offset": 8,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "flags",
+      "offset": 10,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "ciaddr",
+      "offset": 12,
+      "length": 4,
+      "type": "bytes"
+    },
+    {
+      "name": "yiaddr",
+      "offset": 16,
+      "length": 4,
+      "type": "bytes"
+    },
+    {
+      "name": "siaddr",
+      "offset": 20,
+      "length": 4,
+      "type": "bytes"
+    },
+    {
+      "name": "giaddr",
+      "offset": 24,
+      "length": 4,
+      "type": "bytes"
+    },
+    {
+      "name": "chaddr",
+      "offset": 28,
+      "length": 16,
+      "type": "bytes"
+    },
+    {
+      "name": "sname",
+      "offset": 44,
+      "length": 64,
+      "type": "string"
+    },
+    {
+      "name": "file",
+      "offset": 108,
+      "length": 128,
+      "type": "string"
+    },
+    {
+      "name": "magic_cookie",
+      "offset": 236,
+      "length": 4,
+      "type": "fixed",
+      "value": "\x63\x82\x53\x63"
+    },
+    {
+      "name": "option_53",
+      "offset": 240,
+      "length": 3,
+      "type": "bytes"
+    },
+    {
+      "name": "option_51",
+      "offset": 243,
+      "length": 6,
+      "type": "bytes"
+    },
+    {
+      "name": "option_1",
+      "offset": 249,
+      "length": 6,
+      "type": "bytes"
+    },
+    {
+      "name": "option_3",
+      "offset": 255,
+      "length": 6,
+      "type": "bytes"
+    },
+    {
+      "name": "options",
+      "offset": 261,
+      "length": 0,
+      "type": "bytes"
+    }
+  ]
+}

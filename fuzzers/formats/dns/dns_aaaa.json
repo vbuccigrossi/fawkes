@@ -1,0 +1,65 @@
+{
+  "format_name": "dns_aaaa_query",
+  "fields": [
+    {
+      "name": "id",
+      "offset": 0,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "flags",
+      "offset": 2,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "qdcount",
+      "offset": 4,
+      "length": 2,
+      "type": "uint16",
+      "value": 1
+    },
+    {
+      "name": "ancount",
+      "offset": 6,
+      "length": 2,
+      "type": "uint16",
+      "value": 0
+    },
+    {
+      "name": "nscount",
+      "offset": 8,
+      "length": 2,
+      "type": "uint16",
+      "value": 0
+    },
+    {
+      "name": "arcount",
+      "offset": 10,
+      "length": 2,
+      "type": "uint16",
+      "value": 0
+    },
+    {
+      "name": "qname",
+      "offset": 12,
+      "length": 255,
+      "type": "string"
+    },
+    {
+      "name": "qtype",
+      "offset": 267,
+      "length": 2,
+      "type": "uint16",
+      "value": 28
+    },
+    {
+      "name": "qclass",
+      "offset": 269,
+      "length": 2,
+      "type": "uint16",
+      "value": 1
+    }
+  ]
+}

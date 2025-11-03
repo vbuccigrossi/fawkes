@@ -1,0 +1,359 @@
+{
+  "format_name": "otf_advanced",
+  "fields": [
+    {
+      "name": "sfnt_version",
+      "offset": 0,
+      "length": 4,
+      "type": "fixed",
+      "value": "OTTO"
+    },
+    {
+      "name": "num_tables",
+      "offset": 4,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "search_range",
+      "offset": 6,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "entry_selector",
+      "offset": 8,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "range_shift",
+      "offset": 10,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "table_head_tag",
+      "offset": 12,
+      "length": 4,
+      "type": "fixed",
+      "value": "head"
+    },
+    {
+      "name": "table_head_checksum",
+      "offset": 16,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_head_offset",
+      "offset": 20,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_head_length",
+      "offset": 24,
+      "length": 4,
+      "type": "uint32",
+      "controls": "head_data"
+    },
+    {
+      "name": "table_cff_tag",
+      "offset": 28,
+      "length": 4,
+      "type": "fixed",
+      "value": "CFF "
+    },
+    {
+      "name": "table_cff_checksum",
+      "offset": 32,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_cff_offset",
+      "offset": 36,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_cff_length",
+      "offset": 40,
+      "length": 4,
+      "type": "uint32",
+      "controls": "cff_data"
+    },
+    {
+      "name": "table_name_tag",
+      "offset": 44,
+      "length": 4,
+      "type": "fixed",
+      "value": "name"
+    },
+    {
+      "name": "table_name_checksum",
+      "offset": 48,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_name_offset",
+      "offset": 52,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_name_length",
+      "offset": 56,
+      "length": 4,
+      "type": "uint32",
+      "controls": "name_data"
+    },
+    {
+      "name": "table_os2_tag",
+      "offset": 60,
+      "length": 4,
+      "type": "fixed",
+      "value": "OS/2"
+    },
+    {
+      "name": "table_os2_checksum",
+      "offset": 64,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_os2_offset",
+      "offset": 68,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_os2_length",
+      "offset": 72,
+      "length": 4,
+      "type": "uint32",
+      "controls": "os2_data"
+    },
+    {
+      "name": "head_data",
+      "offset": null,
+      "length_field": "table_head_length",
+      "type": "bytes"
+    },
+    {
+      "name": "head_version",
+      "offset": null,
+      "length": 4,
+      "type": "fixed",
+      "value": "\x00\x01\x00\x00"
+    },
+    {
+      "name": "head_font_revision",
+      "offset": null,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "head_checksum_adjust",
+      "offset": null,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "head_magic",
+      "offset": null,
+      "length": 4,
+      "type": "fixed",
+      "value": "\x5F\x0F\x3C\xF5"
+    },
+    {
+      "name": "head_flags",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "head_units_per_em",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "head_created",
+      "offset": null,
+      "length": 8,
+      "type": "bytes"
+    },
+    {
+      "name": "head_modified",
+      "offset": null,
+      "length": 8,
+      "type": "bytes"
+    },
+    {
+      "name": "head_metrics",
+      "offset": null,
+      "length": 8,
+      "type": "bytes"
+    },
+    {
+      "name": "cff_data",
+      "offset": null,
+      "length_field": "table_cff_length",
+      "type": "bytes"
+    },
+    {
+      "name": "cff_header",
+      "offset": null,
+      "length": 4,
+      "type": "bytes"
+    },
+    {
+      "name": "cff_name_index",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    },
+    {
+      "name": "cff_top_dict_index",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    },
+    {
+      "name": "cff_string_index",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    },
+    {
+      "name": "cff_global_subr_index",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    },
+    {
+      "name": "cff_charstrings_index",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    },
+    {
+      "name": "cff_charstring1",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    },
+    {
+      "name": "cff_charstring2",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    },
+    {
+      "name": "name_data",
+      "offset": null,
+      "length_field": "table_name_length",
+      "type": "bytes"
+    },
+    {
+      "name": "name_format",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "name_count",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "name_string_offset",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "name_record1_platform",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "name_record1_encoding",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "name_record1_language",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "name_record1_name_id",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "name_record1_length",
+      "offset": null,
+      "length": 2,
+      "type": "uint16",
+      "controls": "name_record1_string"
+    },
+    {
+      "name": "name_record1_offset",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "name_record1_string",
+      "offset": null,
+      "length_field": "name_record1_length",
+      "type": "string"
+    },
+    {
+      "name": "os2_data",
+      "offset": null,
+      "length_field": "table_os2_length",
+      "type": "bytes"
+    },
+    {
+      "name": "os2_version",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "os2_avg_char_width",
+      "offset": null,
+      "length": 2,
+      "type": "int16"
+    },
+    {
+      "name": "os2_weight_class",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "os2_width_class",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "os2_metrics",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "format_name": "mp3",
+  "fields": [
+    {
+      "name": "id3_header",
+      "offset": 0,
+      "length": 3,
+      "type": "fixed",
+      "value": "ID3"
+    },
+    {
+      "name": "id3_size",
+      "offset": 6,
+      "length": 4,
+      "type": "uint32",
+      "controls": "id3_data"
+    },
+    {
+      "name": "id3_data",
+      "offset": 10,
+      "length_field": "id3_size",
+      "type": "bytes"
+    },
+    {
+      "name": "frame_header",
+      "offset": null,
+      "length": 4,
+      "type": "fixed",
+      "value": "\xFF\xFB"
+    },
+    {
+      "name": "frame_data",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    }
+  ]
+}

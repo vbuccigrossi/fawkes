@@ -1,0 +1,38 @@
+{
+  "format_name": "jpeg",
+  "fields": [
+    {
+      "name": "soi",
+      "offset": 0,
+      "length": 2,
+      "type": "fixed",
+      "value": "\xFF\xD8"
+    },
+    {
+      "name": "app0_marker",
+      "offset": 2,
+      "length": 2,
+      "type": "fixed",
+      "value": "\xFF\xE0"
+    },
+    {
+      "name": "app0_length",
+      "offset": 4,
+      "length": 2,
+      "type": "uint16",
+      "controls": "app0_data"
+    },
+    {
+      "name": "app0_data",
+      "offset": 6,
+      "length_field": "app0_length",
+      "type": "bytes"
+    },
+    {
+      "name": "remainder",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    }
+  ]
+}

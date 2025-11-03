@@ -1,0 +1,281 @@
+{
+  "format_name": "ttf",
+  "fields": [
+    {
+      "name": "sfnt_version",
+      "offset": 0,
+      "length": 4,
+      "type": "fixed",
+      "value": "\x00\x01\x00\x00"
+    },
+    {
+      "name": "num_tables",
+      "offset": 4,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "search_range",
+      "offset": 6,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "entry_selector",
+      "offset": 8,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "range_shift",
+      "offset": 10,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "table_head_tag",
+      "offset": 12,
+      "length": 4,
+      "type": "fixed",
+      "value": "head"
+    },
+    {
+      "name": "table_head_checksum",
+      "offset": 16,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_head_offset",
+      "offset": 20,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_head_length",
+      "offset": 24,
+      "length": 4,
+      "type": "uint32",
+      "controls": "head_data"
+    },
+    {
+      "name": "table_maxp_tag",
+      "offset": 28,
+      "length": 4,
+      "type": "fixed",
+      "value": "maxp"
+    },
+    {
+      "name": "table_maxp_checksum",
+      "offset": 32,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_maxp_offset",
+      "offset": 36,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_maxp_length",
+      "offset": 40,
+      "length": 4,
+      "type": "uint32",
+      "controls": "maxp_data"
+    },
+    {
+      "name": "table_loca_tag",
+      "offset": 44,
+      "length": 4,
+      "type": "fixed",
+      "value": "loca"
+    },
+    {
+      "name": "table_loca_checksum",
+      "offset": 48,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_loca_offset",
+      "offset": 52,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_loca_length",
+      "offset": 56,
+      "length": 4,
+      "type": "uint32",
+      "controls": "loca_data"
+    },
+    {
+      "name": "table_glyf_tag",
+      "offset": 60,
+      "length": 4,
+      "type": "fixed",
+      "value": "glyf"
+    },
+    {
+      "name": "table_glyf_checksum",
+      "offset": 64,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_glyf_offset",
+      "offset": 68,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "table_glyf_length",
+      "offset": 72,
+      "length": 4,
+      "type": "uint32",
+      "controls": "glyf_data"
+    },
+    {
+      "name": "head_data",
+      "offset": null,
+      "length_field": "table_head_length",
+      "type": "bytes"
+    },
+    {
+      "name": "head_version",
+      "offset": null,
+      "length": 4,
+      "type": "fixed",
+      "value": "\x00\x01\x00\x00"
+    },
+    {
+      "name": "head_font_revision",
+      "offset": null,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "head_checksum_adjust",
+      "offset": null,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "head_magic",
+      "offset": null,
+      "length": 4,
+      "type": "fixed",
+      "value": "\x5F\x0F\x3C\xF5"
+    },
+    {
+      "name": "head_flags",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "head_units_per_em",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "head_created",
+      "offset": null,
+      "length": 8,
+      "type": "bytes"
+    },
+    {
+      "name": "head_modified",
+      "offset": null,
+      "length": 8,
+      "type": "bytes"
+    },
+    {
+      "name": "head_metrics",
+      "offset": null,
+      "length": 8,
+      "type": "bytes"
+    },
+    {
+      "name": "maxp_data",
+      "offset": null,
+      "length_field": "table_maxp_length",
+      "type": "bytes"
+    },
+    {
+      "name": "maxp_version",
+      "offset": null,
+      "length": 4,
+      "type": "fixed",
+      "value": "\x00\x01\x00\x00"
+    },
+    {
+      "name": "maxp_num_glyphs",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "loca_data",
+      "offset": null,
+      "length_field": "table_loca_length",
+      "type": "bytes"
+    },
+    {
+      "name": "loca_offset1",
+      "offset": null,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "loca_offset2",
+      "offset": null,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "glyf_data",
+      "offset": null,
+      "length_field": "table_glyf_length",
+      "type": "bytes"
+    },
+    {
+      "name": "glyph1_contours",
+      "offset": null,
+      "length": 2,
+      "type": "int16"
+    },
+    {
+      "name": "glyph1_metrics",
+      "offset": null,
+      "length": 8,
+      "type": "bytes"
+    },
+    {
+      "name": "glyph1_data",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    },
+    {
+      "name": "glyph2_contours",
+      "offset": null,
+      "length": 2,
+      "type": "int16"
+    },
+    {
+      "name": "glyph2_metrics",
+      "offset": null,
+      "length": 8,
+      "type": "bytes"
+    },
+    {
+      "name": "glyph2_data",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "format_name": "dhcpv6_solicit",
+  "fields": [
+    {
+      "name": "msg_type",
+      "offset": 0,
+      "length": 1,
+      "type": "uint8",
+      "value": 1
+    },
+    {
+      "name": "transaction_id",
+      "offset": 1,
+      "length": 3,
+      "type": "bytes"
+    },
+    {
+      "name": "option_1_client_id",
+      "offset": 4,
+      "length": 14,
+      "type": "bytes"
+    },
+    {
+      "name": "option_3_ia_na",
+      "offset": 18,
+      "length": 12,
+      "type": "bytes"
+    },
+    {
+      "name": "option_8_elapsed_time",
+      "offset": 30,
+      "length": 4,
+      "type": "bytes"
+    },
+    {
+      "name": "options",
+      "offset": 34,
+      "length": 0,
+      "type": "bytes"
+    }
+  ]
+}

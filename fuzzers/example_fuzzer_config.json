@@ -1,0 +1,11 @@
+{
+  "format_spec": {
+    "1.txt": "dhcp_1.json",
+    "2.txt": "dhcp_2.json",
+    "3.txt": "dhcp_3.json"
+  },
+  "mutations_per_seed": 100,
+  "crash_feedback": true,
+  "output_dir": "~/fawkes/testcases",
+  "copy_all": true
+}

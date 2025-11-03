@@ -1,0 +1,24 @@
+{
+  "format_name": "doc",
+  "fields": [
+    {
+      "name": "ole_header",
+      "offset": 0,
+      "length": 8,
+      "type": "fixed",
+      "value": "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"
+    },
+    {
+      "name": "sector_size",
+      "offset": 30,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "word_doc_stream",
+      "offset": 512,
+      "length": 0,
+      "type": "bytes"
+    }
+  ]
+}

@@ -1,0 +1,359 @@
+{
+  "format_name": "targz_advanced",
+  "fields": [
+    {
+      "name": "gzip_id",
+      "offset": 0,
+      "length": 2,
+      "type": "fixed",
+      "value": "\x1F\x8B"
+    },
+    {
+      "name": "gzip_compression",
+      "offset": 2,
+      "length": 1,
+      "type": "uint8"
+    },
+    {
+      "name": "gzip_flags",
+      "offset": 3,
+      "length": 1,
+      "type": "uint8"
+    },
+    {
+      "name": "gzip_mtime",
+      "offset": 4,
+      "length": 4,
+      "type": "uint32"
+    },
+    {
+      "name": "gzip_xfl",
+      "offset": 8,
+      "length": 1,
+      "type": "uint8"
+    },
+    {
+      "name": "gzip_os",
+      "offset": 9,
+      "length": 1,
+      "type": "uint8"
+    },
+    {
+      "name": "gzip_extra_length",
+      "offset": 10,
+      "length": 2,
+      "type": "uint16",
+      "controls": "gzip_extra"
+    },
+    {
+      "name": "gzip_extra",
+      "offset": 12,
+      "length_field": "gzip_extra_length",
+      "type": "bytes"
+    },
+    {
+      "name": "tar_header1_name",
+      "offset": null,
+      "length": 100,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_mode",
+      "offset": null,
+      "length": 8,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_uid",
+      "offset": null,
+      "length": 8,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_gid",
+      "offset": null,
+      "length": 8,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_size",
+      "offset": null,
+      "length": 12,
+      "type": "string",
+      "controls": "tar_file1_data"
+    },
+    {
+      "name": "tar_header1_mtime",
+      "offset": null,
+      "length": 12,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_checksum",
+      "offset": null,
+      "length": 8,
+      "type": "string",
+      "covers": [
+        "tar_header1_name",
+        "tar_header1_mode",
+        "tar_header1_uid",
+        "tar_header1_gid",
+        "tar_header1_size",
+        "tar_header1_mtime",
+        "tar_header1_typeflag",
+        "tar_header1_linkname",
+        "tar_header1_magic",
+        "tar_header1_version",
+        "tar_header1_uname",
+        "tar_header1_gname",
+        "tar_header1_devmajor",
+        "tar_header1_devminor",
+        "tar_header1_prefix"
+      ]
+    },
+    {
+      "name": "tar_header1_typeflag",
+      "offset": null,
+      "length": 1,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_linkname",
+      "offset": null,
+      "length": 100,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_magic",
+      "offset": null,
+      "length": 6,
+      "type": "fixed",
+      "value": "ustar "
+    },
+    {
+      "name": "tar_header1_version",
+      "offset": null,
+      "length": 2,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_uname",
+      "offset": null,
+      "length": 32,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_gname",
+      "offset": null,
+      "length": 32,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_devmajor",
+      "offset": null,
+      "length": 8,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_devminor",
+      "offset": null,
+      "length": 8,
+      "type": "string"
+    },
+    {
+      "name": "tar_header1_prefix",
+      "offset": null,
+      "length": 155,
+      "type": "string"
+    },
+    {
+      "name": "tar_file1_data",
+      "offset": null,
+      "length_field": "tar_header1_size",
+      "type": "bytes"
+    },
+    {
+      "name": "tar_file1_padding",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    },
+    {
+      "name": "tar_header2_name",
+      "offset": null,
+      "length": 100,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_mode",
+      "offset": null,
+      "length": 8,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_uid",
+      "offset": null,
+      "length": 8,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_gid",
+      "offset": null,
+      "length": 8,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_size",
+      "offset": null,
+      "length": 12,
+      "type": "string",
+      "controls": "tar_file2_data"
+    },
+    {
+      "name": "tar_header2_mtime",
+      "offset": null,
+      "length": 12,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_checksum",
+      "offset": null,
+      "length": 8,
+      "type": "string",
+      "covers": [
+        "tar_header2_name",
+        "tar_header2_mode",
+        "tar_header2_uid",
+        "tar_header2_gid",
+        "tar_header2_size",
+        "tar_header2_mtime",
+        "tar_header2_typeflag",
+        "tar_header2_linkname",
+        "tar_header2_magic",
+        "tar_header2_version",
+        "tar_header2_uname",
+        "tar_header2_gname",
+        "tar_header2_devmajor",
+        "tar_header2_devminor",
+        "tar_header2_prefix"
+      ]
+    },
+    {
+      "name": "tar_header2_typeflag",
+      "offset": null,
+      "length": 1,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_linkname",
+      "offset": null,
+      "length": 100,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_magic",
+      "offset": null,
+      "length": 6,
+      "type": "fixed",
+      "value": "ustar "
+    },
+    {
+      "name": "tar_header2_version",
+      "offset": null,
+      "length": 2,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_uname",
+      "offset": null,
+      "length": 32,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_gname",
+      "offset": null,
+      "length": 32,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_devmajor",
+      "offset": null,
+      "length": 8,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_devminor",
+      "offset": null,
+      "length": 8,
+      "type": "string"
+    },
+    {
+      "name": "tar_header2_prefix",
+      "offset": null,
+      "length": 155,
+      "type": "string"
+    },
+    {
+      "name": "tar_file2_data",
+      "offset": null,
+      "length_field": "tar_header2_size",
+      "type": "bytes"
+    },
+    {
+      "name": "tar_file2_padding",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    },
+    {
+      "name": "gzip_crc",
+      "offset": null,
+      "length": 4,
+      "type": "crc32",
+      "covers": [
+        "tar_header1_name",
+        "tar_header1_mode",
+        "tar_header1_uid",
+        "tar_header1_gid",
+        "tar_header1_size",
+        "tar_header1_mtime",
+        "tar_header1_checksum",
+        "tar_header1_typeflag",
+        "tar_header1_linkname",
+        "tar_header1_magic",
+        "tar_header1_version",
+        "tar_header1_uname",
+        "tar_header1_gname",
+        "tar_header1_devmajor",
+        "tar_header1_devminor",
+        "tar_header1_prefix",
+        "tar_file1_data",
+        "tar_file1_padding",
+        "tar_header2_name",
+        "tar_header2_mode",
+        "tar_header2_uid",
+        "tar_header2_gid",
+        "tar_header2_size",
+        "tar_header2_mtime",
+        "tar_header2_checksum",
+        "tar_header2_typeflag",
+        "tar_header2_linkname",
+        "tar_header2_magic",
+        "tar_header2_version",
+        "tar_header2_uname",
+        "tar_header2_gname",
+        "tar_header2_devmajor",
+        "tar_header2_devminor",
+        "tar_header2_prefix",
+        "tar_file2_data",
+        "tar_file2_padding"
+      ]
+    },
+    {
+      "name": "gzip_size",
+      "offset": null,
+      "length": 4,
+      "type": "uint32"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "format_spec": {
+    "testcase.ttf": "dhcp_1.json"
+  },
+  "mutations_per_seed": 100,
+  "crash_feedback": true,
+  "output_dir": "/home/ebrown/fawkes_shared",
+  "copy_all": true
+}

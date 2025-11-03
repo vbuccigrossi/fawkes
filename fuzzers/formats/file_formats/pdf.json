@@ -1,0 +1,37 @@
+{
+  "format_name": "pdf",
+  "fields": [
+    {
+      "name": "header",
+      "offset": 0,
+      "length": 8,
+      "type": "fixed",
+      "value": "%PDF-1.4"
+    },
+    {
+      "name": "object_start",
+      "offset": null,
+      "length": 10,
+      "type": "string"
+    },
+    {
+      "name": "stream_length",
+      "offset": null,
+      "length": 4,
+      "type": "uint32",
+      "controls": "stream_data"
+    },
+    {
+      "name": "stream_data",
+      "offset": null,
+      "length_field": "stream_length",
+      "type": "bytes"
+    },
+    {
+      "name": "trailer",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    }
+  ]
+}

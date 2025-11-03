@@ -1,0 +1,24 @@
+{
+  "format_name": "svg",
+  "fields": [
+    {
+      "name": "xml_header",
+      "offset": 0,
+      "length": 38,
+      "type": "fixed",
+      "value": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+    },
+    {
+      "name": "svg_tag",
+      "offset": null,
+      "length": 50,
+      "type": "string"
+    },
+    {
+      "name": "content",
+      "offset": null,
+      "length": 0,
+      "type": "string"
+    }
+  ]
+}

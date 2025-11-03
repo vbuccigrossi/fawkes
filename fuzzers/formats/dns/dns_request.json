@@ -1,0 +1,59 @@
+{
+  "format_name": "dns_query",
+  "fields": [
+    {
+      "name": "transaction_id",
+      "offset": 0,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "flags",
+      "offset": 2,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "questions",
+      "offset": 4,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "answer_rrs",
+      "offset": 6,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "authority_rrs",
+      "offset": 8,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "additional_rrs",
+      "offset": 10,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "query_name",
+      "offset": 12,
+      "length": 256,
+      "type": "bytes"
+    },
+    {
+      "name": "query_type",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    },
+    {
+      "name": "query_class",
+      "offset": null,
+      "length": 2,
+      "type": "uint16"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "format_name": "mp4",
+  "fields": [
+    {
+      "name": "ftyp_size",
+      "offset": 0,
+      "length": 4,
+      "type": "uint32",
+      "controls": "ftyp_data"
+    },
+    {
+      "name": "ftyp_type",
+      "offset": 4,
+      "length": 4,
+      "type": "fixed",
+      "value": "ftyp"
+    },
+    {
+      "name": "ftyp_data",
+      "offset": 8,
+      "length_field": "ftyp_size",
+      "type": "bytes"
+    },
+    {
+      "name": "moov_size",
+      "offset": null,
+      "length": 4,
+      "type": "uint32",
+      "controls": "moov_data"
+    },
+    {
+      "name": "moov_type",
+      "offset": null,
+      "length": 4,
+      "type": "fixed",
+      "value": "moov"
+    },
+    {
+      "name": "moov_data",
+      "offset": null,
+      "length_field": "moov_size",
+      "type": "bytes"
+    }
+  ]
+}

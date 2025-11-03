@@ -1,0 +1,24 @@
+{
+  "format_name": "docx",
+  "fields": [
+    {
+      "name": "zip_header",
+      "offset": 0,
+      "length": 4,
+      "type": "fixed",
+      "value": "PK\x03\x04"
+    },
+    {
+      "name": "document_xml",
+      "offset": null,
+      "length": 0,
+      "type": "string"
+    },
+    {
+      "name": "remainder",
+      "offset": null,
+      "length": 0,
+      "type": "bytes"
+    }
+  ]
+}

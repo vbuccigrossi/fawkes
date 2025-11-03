@@ -1,0 +1,66 @@
+{
+  "format_name": "png",
+  "fields": [
+    {
+      "name": "signature",
+      "offset": 0,
+      "length": 8,
+      "type": "fixed",
+      "value": "\x89PNG\r\n\x1A\n"
+    },
+    {
+      "name": "ihdr_length",
+      "offset": 8,
+      "length": 4,
+      "type": "uint32",
+      "controls": "ihdr_data"
+    },
+    {
+      "name": "ihdr_type",
+      "offset": 12,
+      "length": 4,
+      "type": "fixed",
+      "value": "IHDR"
+    },
+    {
+      "name": "ihdr_data",
+      "offset": 16,
+      "length_field": "ihdr_length",
+      "type": "bytes"
+    },
+    {
+      "name": "ihdr_crc",
+      "offset": null,
+      "length": 4,
+      "type": "crc32",
+      "covers": ["ihdr_type", "ihdr_data"]
+    },
+    {
+      "name": "idat_length",
+      "offset": null,
+      "length": 4,
+      "type": "uint32",
+      "controls": "idat_data"
+    },
+    {
+      "name": "idat_type",
+      "offset": null,
+      "length": 4,
+      "type": "fixed",
+      "value": "IDAT"
+    },
+    {
+      "name": "idat_data",
+      "offset": null,
+      "length_field": "idat_length",
+      "type": "bytes"
+    },
+    {
+      "name": "idat_crc",
+      "offset": null,
+      "length": 4,
+      "type": "crc32",
+      "covers": ["idat_type", "idat_data"]
+    }
+  ]
+}
