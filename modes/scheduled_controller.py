@@ -7,6 +7,7 @@ Uses the advanced scheduler for distributed job management with:
 - Heartbeat-based health monitoring
 - Automatic failure recovery
 - Deadline enforcement
+- Authentication and TLS encryption support
 """
 
 import logging
@@ -16,19 +17,26 @@ import json
 import os
 import tarfile
 import tempfile
+import ssl
 from pathlib import Path
 
 from fawkes.db.scheduler_db import SchedulerDB
 from fawkes.scheduler.scheduler import SchedulerOrchestrator
 from fawkes.globals import shutdown_event
+from fawkes.auth.middleware import add_authentication
+from fawkes.auth.tls import create_ssl_context, ensure_certificates
 
 logger = logging.getLogger("fawkes.controller")
 CONTROLLER_PORT = 9999
 
 
-def push_job_to_worker(worker_ip: str, job_config: dict):
+def push_job_to_worker(worker_ip: str, job_config: dict, cfg: dict = None):
     """Send job configuration, VM image, and test cases to a worker."""
     sock = None
+    cfg = cfg or {}
+    auth_enabled = cfg.get("auth_enabled", False)
+    tls_enabled = cfg.get("tls_enabled", False)
+
     try:
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as temp_tar:
             tar_path = temp_tar.name
@@ -58,12 +66,39 @@ def push_job_to_worker(worker_ip: str, job_config: dict):
         sock.settimeout(10)
         sock.connect((worker_ip, CONTROLLER_PORT))
 
+        # Wrap with TLS if enabled
+        if tls_enabled:
+            try:
+                cert_file, key_file = ensure_certificates(
+                    cfg.get("tls_cert"),
+                    cfg.get("tls_key")
+                )
+                ssl_context = create_ssl_context(
+                    cert_file=cert_file,
+                    key_file=key_file,
+                    is_server=False
+                )
+                sock = ssl_context.wrap_socket(sock, server_hostname=worker_ip)
+                logger.debug(f"Established TLS connection to {worker_ip}")
+            except Exception as e:
+                logger.error(f"TLS handshake failed with {worker_ip}: {e}")
+                raise
+
         msg = {
             "type": "PUSH_JOB",
             "job_id": job_config["job_id"],
             "config": job_config,
             "package_size": tar_size
         }
+
+        # Add authentication if enabled
+        if auth_enabled:
+            api_key = cfg.get("controller_api_key")
+            if not api_key:
+                logger.error("Authentication enabled but no controller_api_key configured")
+                return False
+            msg = add_authentication(msg, "api_key", api_key)
+
         msg_data = json.dumps(msg).encode()
         sock.send(len(msg_data).to_bytes(4, byteorder="big"))
         sock.send(msg_data)
@@ -101,16 +136,40 @@ def push_job_to_worker(worker_ip: str, job_config: dict):
             os.unlink(tar_path)
 
 
-def collect_worker_status(worker_ip: str) -> dict:
+def collect_worker_status(worker_ip: str, cfg: dict = None) -> dict:
     """Request status from a worker"""
     sock = None
+    cfg = cfg or {}
+    auth_enabled = cfg.get("auth_enabled", False)
+    tls_enabled = cfg.get("tls_enabled", False)
+
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5)
         sock.connect((worker_ip, CONTROLLER_PORT))
 
+        # Wrap with TLS if enabled
+        if tls_enabled:
+            cert_file, key_file = ensure_certificates(
+                cfg.get("tls_cert"),
+                cfg.get("tls_key")
+            )
+            ssl_context = create_ssl_context(
+                cert_file=cert_file,
+                key_file=key_file,
+                is_server=False
+            )
+            sock = ssl_context.wrap_socket(sock, server_hostname=worker_ip)
+
         # Request status
         status_msg = {"type": "STATUS_REQUEST"}
+
+        # Add authentication if enabled
+        if auth_enabled:
+            api_key = cfg.get("controller_api_key")
+            if api_key:
+                status_msg = add_authentication(status_msg, "api_key", api_key)
+
         status_data = json.dumps(status_msg).encode()
         sock.send(len(status_data).to_bytes(4, byteorder="big"))
         sock.send(status_data)
@@ -135,15 +194,39 @@ def collect_worker_status(worker_ip: str) -> dict:
             sock.close()
 
 
-def collect_worker_crashes(worker_ip: str, job_id: int) -> list:
+def collect_worker_crashes(worker_ip: str, job_id: int, cfg: dict = None) -> list:
     """Request crashes from a worker for a specific job"""
     sock = None
+    cfg = cfg or {}
+    auth_enabled = cfg.get("auth_enabled", False)
+    tls_enabled = cfg.get("tls_enabled", False)
+
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(5)
         sock.connect((worker_ip, CONTROLLER_PORT))
 
+        # Wrap with TLS if enabled
+        if tls_enabled:
+            cert_file, key_file = ensure_certificates(
+                cfg.get("tls_cert"),
+                cfg.get("tls_key")
+            )
+            ssl_context = create_ssl_context(
+                cert_file=cert_file,
+                key_file=key_file,
+                is_server=False
+            )
+            sock = ssl_context.wrap_socket(sock, server_hostname=worker_ip)
+
         crash_msg = {"type": "CRASH_REQUEST", "job_id": job_id}
+
+        # Add authentication if enabled
+        if auth_enabled:
+            api_key = cfg.get("controller_api_key")
+            if api_key:
+                crash_msg = add_authentication(crash_msg, "api_key", api_key)
+
         crash_data = json.dumps(crash_msg).encode()
         sock.send(len(crash_data).to_bytes(4, byteorder="big"))
         sock.send(crash_data)
@@ -201,6 +284,10 @@ def run_scheduled_controller(cfg):
             )
 
     logger.info(f"Scheduler-based controller started (strategy={allocation_strategy})")
+    if cfg.get("auth_enabled", False):
+        logger.info("Authentication: ENABLED")
+    if cfg.get("tls_enabled", False):
+        logger.info("TLS encryption: ENABLED")
 
     # Track assigned jobs that need to be pushed to workers
     pending_pushes = {}
@@ -222,7 +309,7 @@ def run_scheduled_controller(cfg):
                 worker_ip = worker_data["ip_address"]
 
                 # Collect status
-                status = collect_worker_status(worker_ip)
+                status = collect_worker_status(worker_ip, cfg)
                 if status:
                     # Update heartbeat
                     current_load = {
@@ -235,7 +322,7 @@ def run_scheduled_controller(cfg):
 
                     # Collect crashes for all running jobs
                     for job_id in status.get("status", {}):
-                        crashes = collect_worker_crashes(worker_ip, job_id)
+                        crashes = collect_worker_crashes(worker_ip, job_id, cfg)
                         for crash in crashes:
                             db.add_crash(job_id, worker_id, crash)
                 else:
@@ -255,7 +342,7 @@ def run_scheduled_controller(cfg):
                     job_config["job_id"] = job_id
 
                     logger.info(f"Pushing job {job_id} to worker {worker_id} ({worker_ip})")
-                    if push_job_to_worker(worker_ip, job_config):
+                    if push_job_to_worker(worker_ip, job_config, cfg):
                         db.update_job_status(job_id, "running")
                         logger.info(f"Job {job_id} successfully pushed to worker {worker_id}")
                     else:
