@@ -1,0 +1,451 @@
+#!/usr/bin/env python3
+"""
+Fawkes Scheduler CLI
+
+Manage distributed fuzzing jobs with advanced scheduling features.
+"""
+
+import sys
+import os
+import argparse
+import logging
+import json
+from pathlib import Path
+from datetime import datetime, timedelta
+from tabulate import tabulate
+
+# Add parent directory to path
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir))
+
+from fawkes.db.scheduler_db import SchedulerDB
+
+
+def setup_logging(level=logging.INFO):
+    """Setup logging configuration"""
+    logging.basicConfig(
+        level=level,
+        format='[%(asctime)s] %(levelname)s: %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    return logging.getLogger("fawkes.scheduler.cli")
+
+
+def cmd_add_job(args, db):
+    """Add a new job to the scheduler"""
+    logger = logging.getLogger("fawkes.scheduler.cli")
+
+    # Load job config from JSON file
+    with open(args.config, 'r') as f:
+        job_config = json.load(f)
+
+    # Parse resource requirements if provided
+    resource_requirements = None
+    if args.resources:
+        parts = args.resources.split(',')
+        resource_requirements = {}
+        for part in parts:
+            key, val = part.split('=')
+            resource_requirements[key.strip()] = int(val.strip())
+
+    # Parse deadline if provided
+    deadline = None
+    if args.deadline:
+        if args.deadline.endswith('h'):
+            hours = int(args.deadline[:-1])
+            deadline = int((datetime.now() + timedelta(hours=hours)).timestamp())
+        elif args.deadline.endswith('d'):
+            days = int(args.deadline[:-1])
+            deadline = int((datetime.now() + timedelta(days=days)).timestamp())
+        else:
+            deadline = int(args.deadline)  # Unix timestamp
+
+    # Parse dependencies if provided
+    dependencies = None
+    if args.depends_on:
+        dependencies = [int(x) for x in args.depends_on.split(',')]
+
+    # Add job
+    job_id = db.add_job(
+        name=args.name,
+        config=job_config,
+        priority=args.priority,
+        deadline=deadline,
+        dependencies=dependencies,
+        resource_requirements=resource_requirements
+    )
+
+    logger.info(f"Job added: {job_id}")
+    print(f"\nJob ID: {job_id}")
+    print(f"Name: {args.name}")
+    print(f"Priority: {args.priority}")
+    if deadline:
+        print(f"Deadline: {datetime.fromtimestamp(deadline).strftime('%Y-%m-%d %H:%M:%S')}")
+    if dependencies:
+        print(f"Dependencies: {dependencies}")
+    if resource_requirements:
+        print(f"Resources: {resource_requirements}")
+    print(f"Status: queued\n")
+
+
+def cmd_list_jobs(args, db):
+    """List jobs with filters"""
+    cursor = db.conn.cursor()
+
+    # Build query based on filters
+    where_clauses = []
+    params = []
+
+    if args.status:
+        where_clauses.append("status = ?")
+        params.append(args.status)
+
+    if args.min_priority:
+        where_clauses.append("priority >= ?")
+        params.append(args.min_priority)
+
+    where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+    cursor.execute(f'''SELECT job_id, name, status, priority, created_time, start_time, end_time
+                      FROM jobs{where_sql}
+                      ORDER BY priority DESC, created_time ASC
+                      LIMIT ?''', params + [args.limit])
+
+    rows = cursor.fetchall()
+
+    if not rows:
+        print("No jobs found")
+        return
+
+    # Format for display
+    table_data = []
+    for row in rows:
+        job_id, name, status, priority, created, started, ended = row
+
+        created_str = datetime.fromtimestamp(created).strftime('%Y-%m-%d %H:%M') if created else '-'
+        started_str = datetime.fromtimestamp(started).strftime('%Y-%m-%d %H:%M') if started else '-'
+        ended_str = datetime.fromtimestamp(ended).strftime('%Y-%m-%d %H:%M') if ended else '-'
+
+        # Calculate runtime if applicable
+        if started and ended:
+            runtime = timedelta(seconds=ended - started)
+        elif started:
+            runtime = timedelta(seconds=int(datetime.now().timestamp()) - started)
+        else:
+            runtime = '-'
+
+        table_data.append([
+            job_id,
+            name[:30],
+            status,
+            priority,
+            created_str,
+            started_str,
+            runtime
+        ])
+
+    headers = ['ID', 'Name', 'Status', 'Priority', 'Created', 'Started', 'Runtime']
+    print(tabulate(table_data, headers=headers, tablefmt='grid'))
+    print(f"\nTotal: {len(rows)} jobs")
+
+
+def cmd_job_status(args, db):
+    """Show detailed job status"""
+    job = db.get_job(args.job_id)
+    if not job:
+        print(f"Job {args.job_id} not found")
+        return
+
+    print(f"\n{'=' * 80}")
+    print(f"JOB STATUS: {job['job_id']}")
+    print(f"{'=' * 80}")
+    print(f"Name: {job['name']}")
+    print(f"Status: {job['status']}")
+    print(f"Priority: {job['priority']}/100")
+
+    if job['created_time']:
+        print(f"Created: {datetime.fromtimestamp(job['created_time']).strftime('%Y-%m-%d %H:%M:%S')}")
+
+    if job['start_time']:
+        print(f"Started: {datetime.fromtimestamp(job['start_time']).strftime('%Y-%m-%d %H:%M:%S')}")
+
+    if job['end_time']:
+        print(f"Ended: {datetime.fromtimestamp(job['end_time']).strftime('%Y-%m-%d %H:%M:%S')}")
+        runtime = job['end_time'] - job['start_time']
+        print(f"Runtime: {timedelta(seconds=runtime)}")
+
+    if job['deadline']:
+        deadline_str = datetime.fromtimestamp(job['deadline']).strftime('%Y-%m-%d %H:%M:%S')
+        now = datetime.now().timestamp()
+        if now > job['deadline']:
+            print(f"Deadline: {deadline_str} (MISSED)")
+        else:
+            time_left = timedelta(seconds=job['deadline'] - now)
+            print(f"Deadline: {deadline_str} ({time_left} remaining)")
+
+    if job['assigned_worker_id']:
+        worker = db.get_worker(job['assigned_worker_id'])
+        if worker:
+            print(f"Worker: {worker['worker_id']} ({worker['ip_address']})")
+
+    if job['retry_count'] > 0:
+        print(f"Retries: {job['retry_count']}/{job['max_retries']}")
+
+    if job['dependencies']:
+        print(f"Dependencies: {job['dependencies']}")
+
+    if job['resource_requirements']:
+        print(f"Resource Requirements: {job['resource_requirements']}")
+
+    if job['error_message']:
+        print(f"\nError: {job['error_message']}")
+
+    # Get crash count
+    crashes = db.get_crashes(args.job_id)
+    print(f"\nCrashes: {len(crashes)}")
+
+    print(f"{'=' * 80}\n")
+
+
+def cmd_cancel_job(args, db):
+    """Cancel a pending or running job"""
+    logger = logging.getLogger("fawkes.scheduler.cli")
+
+    job = db.get_job(args.job_id)
+    if not job:
+        print(f"Job {args.job_id} not found")
+        return
+
+    if job['status'] in ('completed', 'failed', 'cancelled'):
+        print(f"Job {args.job_id} is already {job['status']}")
+        return
+
+    db.update_job_status(args.job_id, 'cancelled')
+    logger.info(f"Job {args.job_id} cancelled")
+    print(f"Job {args.job_id} cancelled")
+
+
+def cmd_register_worker(args, db):
+    """Register a new worker"""
+    logger = logging.getLogger("fawkes.scheduler.cli")
+
+    # Parse capabilities if provided
+    capabilities = None
+    if args.capabilities:
+        capabilities = {}
+        for cap in args.capabilities.split(','):
+            key, val = cap.split('=')
+            capabilities[key.strip()] = int(val.strip())
+
+    # Parse tags
+    tags = args.tags.split(',') if args.tags else None
+
+    worker_id = db.register_worker(
+        ip_address=args.ip,
+        hostname=args.hostname,
+        capabilities=capabilities,
+        tags=tags
+    )
+
+    logger.info(f"Worker registered: {worker_id}")
+    print(f"\nWorker ID: {worker_id}")
+    print(f"IP Address: {args.ip}")
+    if args.hostname:
+        print(f"Hostname: {args.hostname}")
+    if capabilities:
+        print(f"Capabilities: {capabilities}")
+    if tags:
+        print(f"Tags: {tags}")
+    print()
+
+
+def cmd_list_workers(args, db):
+    """List all workers"""
+    cursor = db.conn.cursor()
+
+    # Build query based on filters
+    where_clauses = []
+    params = []
+
+    if args.status:
+        where_clauses.append("status = ?")
+        params.append(args.status)
+
+    where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+    cursor.execute(f'''SELECT worker_id, ip_address, hostname, status, capabilities,
+                      current_load, last_heartbeat
+                      FROM workers{where_sql}''', params)
+
+    rows = cursor.fetchall()
+
+    if not rows:
+        print("No workers found")
+        return
+
+    # Format for display
+    table_data = []
+    for row in rows:
+        worker_id, ip, hostname, status, caps_json, load_json, last_hb = row
+
+        caps = json.loads(caps_json) if caps_json else {}
+        load = json.loads(load_json) if load_json else {}
+
+        max_vms = caps.get('max_vms', '-')
+        used_vms = load.get('used_vms', 0)
+        active_jobs = load.get('active_jobs', 0)
+
+        if last_hb:
+            last_hb_str = datetime.fromtimestamp(last_hb).strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            last_hb_str = 'Never'
+
+        table_data.append([
+            worker_id,
+            ip,
+            hostname or '-',
+            status,
+            f"{used_vms}/{max_vms}",
+            active_jobs,
+            last_hb_str
+        ])
+
+    headers = ['ID', 'IP Address', 'Hostname', 'Status', 'VMs', 'Jobs', 'Last Heartbeat']
+    print(tabulate(table_data, headers=headers, tablefmt='grid'))
+    print(f"\nTotal: {len(rows)} workers")
+
+
+def cmd_stats(args, db):
+    """Show scheduler statistics"""
+    job_stats = db.get_job_stats()
+    worker_stats = db.get_worker_stats()
+    queue_length = db.get_queue_length()
+
+    print(f"\n{'=' * 80}")
+    print("SCHEDULER STATISTICS")
+    print(f"{'=' * 80}\n")
+
+    print("Jobs:")
+    for status, count in sorted(job_stats.items()):
+        print(f"  {status:15s}: {count:4d}")
+    print(f"  {'Queue':15s}: {queue_length:4d}")
+    print()
+
+    print("Workers:")
+    for status, count in sorted(worker_stats.items()):
+        print(f"  {status:15s}: {count:4d}")
+    print()
+
+    # Get crash stats
+    cursor = db.conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM crashes")
+    total_crashes = cursor.fetchone()[0]
+    print(f"Total Crashes: {total_crashes}")
+
+    print(f"\n{'=' * 80}\n")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Fawkes Scheduler - Distributed job scheduling and management"
+    )
+
+    parser.add_argument('--db', default='~/.fawkes/scheduler.db',
+                       help='Scheduler database path (default: ~/.fawkes/scheduler.db)')
+    parser.add_argument('--log-level', default='INFO',
+                       choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                       help='Logging level')
+
+    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
+
+    # Add job command
+    add_parser = subparsers.add_parser('add', help='Add a new job')
+    add_parser.add_argument('name', help='Job name/description')
+    add_parser.add_argument('config', help='Path to job config JSON file')
+    add_parser.add_argument('--priority', type=int, default=50,
+                           help='Job priority 0-100 (default: 50)')
+    add_parser.add_argument('--deadline', type=str,
+                           help='Deadline as unix timestamp or "24h", "7d"')
+    add_parser.add_argument('--depends-on', type=str,
+                           help='Comma-separated list of job IDs this job depends on')
+    add_parser.add_argument('--resources', type=str,
+                           help='Resource requirements: "cpu=4,ram=8,vms=2"')
+
+    # List jobs command
+    list_parser = subparsers.add_parser('list', help='List jobs')
+    list_parser.add_argument('--status',
+                            choices=['pending', 'assigned', 'running', 'completed', 'failed', 'cancelled'],
+                            help='Filter by status')
+    list_parser.add_argument('--min-priority', type=int,
+                            help='Show only jobs with priority >= this value')
+    list_parser.add_argument('--limit', type=int, default=50,
+                            help='Maximum number of jobs to show (default: 50)')
+
+    # Job status command
+    status_parser = subparsers.add_parser('status', help='Show detailed job status')
+    status_parser.add_argument('job_id', type=int, help='Job ID')
+
+    # Cancel job command
+    cancel_parser = subparsers.add_parser('cancel', help='Cancel a job')
+    cancel_parser.add_argument('job_id', type=int, help='Job ID to cancel')
+
+    # Register worker command
+    register_parser = subparsers.add_parser('register-worker', help='Register a worker')
+    register_parser.add_argument('ip', help='Worker IP address')
+    register_parser.add_argument('--hostname', help='Worker hostname')
+    register_parser.add_argument('--capabilities',
+                                help='Worker capabilities: "cpu_cores=8,ram_gb=16,max_vms=4"')
+    register_parser.add_argument('--tags', help='Comma-separated tags')
+
+    # List workers command
+    workers_parser = subparsers.add_parser('workers', help='List workers')
+    workers_parser.add_argument('--status', choices=['online', 'offline'],
+                               help='Filter by status')
+
+    # Statistics command
+    subparsers.add_parser('stats', help='Show scheduler statistics')
+
+    args = parser.parse_args()
+
+    # Setup logging
+    log_level = getattr(logging, args.log_level.upper())
+    logger = setup_logging(log_level)
+
+    # Expand database path
+    db_path = os.path.expanduser(args.db)
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    # Open database
+    db = SchedulerDB(db_path)
+
+    try:
+        if args.command == 'add':
+            cmd_add_job(args, db)
+        elif args.command == 'list':
+            cmd_list_jobs(args, db)
+        elif args.command == 'status':
+            cmd_job_status(args, db)
+        elif args.command == 'cancel':
+            cmd_cancel_job(args, db)
+        elif args.command == 'register-worker':
+            cmd_register_worker(args, db)
+        elif args.command == 'workers':
+            cmd_list_workers(args, db)
+        elif args.command == 'stats':
+            cmd_stats(args, db)
+
+    except KeyboardInterrupt:
+        logger.info("\nInterrupted by user")
+        sys.exit(130)
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        sys.exit(1)
+    finally:
+        db.close()
+
+
+if __name__ == '__main__':
+    main()
