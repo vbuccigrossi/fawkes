@@ -104,7 +104,7 @@ def main():
            cfg.poll_interval=args.poll_interval
            logger.info(f"Using poll interval: {cfg.poll_interval}")
         if args.job_dir:
-           cfg.Job_dir=args.job_dir
+           cfg.job_dir=args.job_dir
            logger.info(f"Using job directory: {cfg.job_dir}")
         if args.controller_port:
            cfg.controller_port=args.controller_port
@@ -116,7 +116,7 @@ def main():
            cfg.fuzzer=args.fuzzer
            logger.info(f"Using Fuzzer: {cfg.fuzzer}")
         if args.fuzzer_config:
-           cfg.fuzzer_config=fuzzer_config
+           cfg.fuzzer_config=args.fuzzer_config
            logger.info(f"Using fuzzer configuration: {cfg.fuzzer_config}")
         if args.crash_dir:
            cfg.crash_dir = args.crash_dir

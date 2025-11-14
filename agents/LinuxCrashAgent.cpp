@@ -2,11 +2,11 @@
 //
 // A Linux Crash Agent that:
 // 1) Sets /proc/sys/kernel/core_pattern => /mnt/virtfs/fawkes/crashes/core.%p
-// 2) "ulimit -c unlimited"
+// 2) Sets unlimited core dumps using setrlimit
 // 3) Watches /mnt/virtfs/fawkes/crashes for new core.* files
 // 4) Keeps a single "last crash" record with fields analogous to the Windows agent:
 //    { "crash": true, "pid": <pid>, "exe": "...", "exception": "0xC0000005", "file": "<corefile>" }
-// 5) Runs a small TCP server at 127.0.0.1:9999 returning the above JSON.
+// 5) Runs a small TCP server at 0.0.0.0:9999 returning the above JSON.
 //
 // This approach ensures the harness sees the exact same JSON protocol as on Windows.
 
@@ -14,9 +14,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <csignal>
+#include <cerrno>
+#include <cstring>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/resource.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <filesystem>
@@ -75,7 +78,7 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
-// 2) Configure core_pattern => /mnt/virtfs/fawkes/crashes/core.%p + "ulimit -c unlimited"
+// 2) Configure core_pattern => /mnt/virtfs/fawkes/crashes/core.%p + setrlimit for unlimited cores
 bool ConfigureCorePattern() {
     // Write /proc/sys/kernel/core_pattern
     {
@@ -88,11 +91,15 @@ bool ConfigureCorePattern() {
         ofs.close();
         std::cout << "[AGENT] core_pattern => " << CORE_PATTERN_VALUE << "\n";
     }
-    // "ulimit -c unlimited"
-    int ret = system("ulimit -c unlimited");
-    if (ret != 0) {
-        std::cerr << "[AGENT] 'ulimit -c unlimited' returned " << ret << ". Possibly ignore.\n";
+    // Set unlimited core dumps using setrlimit (safer than system())
+    struct rlimit core_limit;
+    core_limit.rlim_cur = RLIM_INFINITY;
+    core_limit.rlim_max = RLIM_INFINITY;
+    if (setrlimit(RLIMIT_CORE, &core_limit) != 0) {
+        std::cerr << "[AGENT] setrlimit(RLIMIT_CORE, unlimited) failed: " << strerror(errno) << "\n";
+        return false;
     }
+    std::cout << "[AGENT] Core dump size set to unlimited\n";
     return true;
 }
 
@@ -178,7 +185,7 @@ void StartTCPServer() {
     sockaddr_in addr;
     addr.sin_family      = AF_INET;
     addr.sin_port        = htons(9999);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);  // Bind to all interfaces so QEMU host can reach
 
     if (bind(serverSock, (sockaddr*)&addr, sizeof(addr)) < 0) {
         std::cerr << "[AGENT] bind() failed\n";

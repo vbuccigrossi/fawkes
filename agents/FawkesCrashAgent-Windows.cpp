@@ -4,7 +4,7 @@
 // then store user-mode crashes in Z:\qemu.
 //
 // Compile (using MinGW on Linux):
-//   i686-w64-mingw32-g++ -std=c++17 -O2 -static FawkesCrashAgent-Windows.cpp -lws2_32 -lole32 -lpsapi -o FawkesCrashAgentWindows.exe
+//   i686-w64-mingw32-g++ -std=c++17 -O2 -static FawkesCrashAgent-Windows.cpp -lws2_32 -lole32 -lpsapi -lmpr -o FawkesCrashAgentWindows.exe
 
 #include <winsock2.h>
 #include <windows.h>
@@ -12,6 +12,7 @@
 
 #include <psapi.h>
 #include <shlwapi.h>
+#include <winnetwk.h>  // For WNetAddConnection2
 
 #include <cstdio>
 #include <cstdlib>
@@ -29,10 +30,8 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-// 1) Our SMB share info
-static const char* SMB_COMMAND = R"(net use Z: \\10.0.2.4\qemu /persistent:no)";
-// If you have credentials, you'd do something like:
-// net use Z: \\10.0.2.4\qemu MyPassword /user:MYDOMAIN\myuser /persistent:no
+// 1) Our SMB share info (no longer using system() command)
+// Using WNetAddConnection2 for safer mounting
 
 // The path we actually store crashes
 static const char* CRASH_SUBDIR = "Z:\\qemu";
@@ -205,15 +204,25 @@ void MountShareLoop() {
         // Check every 5 seconds
         std::this_thread::sleep_for(std::chrono::seconds(5));
 
-        // If Z:\ not accessible, do "net use"
+        // If Z:\ not accessible, mount using WNetAddConnection2 (safer than system())
         if (!IsDriveMounted("Z:\\")) {
             std::cout << "[AGENT] Attempting to mount SMB share...\n";
-            // system() is stupid, but works
-            int ret = system(SMB_COMMAND);
-            if (ret == 0) {
+
+            NETRESOURCEA netResource;
+            memset(&netResource, 0, sizeof(netResource));
+            netResource.dwType = RESOURCETYPE_DISK;
+            netResource.lpLocalName = "Z:";
+            netResource.lpRemoteName = "\\\\10.0.2.4\\qemu";
+            netResource.lpProvider = NULL;
+
+            // Try to add network connection (no credentials for now)
+            DWORD result = WNetAddConnection2A(&netResource, NULL, NULL, 0);
+            if (result == NO_ERROR) {
                 std::cout << "[AGENT] SMB share mounted successfully.\n";
+            } else if (result == ERROR_ALREADY_ASSIGNED) {
+                std::cout << "[AGENT] Share already mounted.\n";
             } else {
-                std::cerr << "[AGENT] net use command failed with code " << ret << "\n";
+                std::cerr << "[AGENT] Failed to mount share, error code: " << result << "\n";
             }
         }
     }
@@ -245,7 +254,7 @@ void StartTCPServer() {
     sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_port = htons(9999);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);  // Bind to all interfaces so QEMU host can reach
 
     if (bind(serverSock, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
         std::cerr << "[AGENT] bind() failed\n";

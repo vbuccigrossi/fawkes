@@ -15,12 +15,24 @@ shutdown_event = threading.Event()
 @contextmanager
 def file_lock(lock_file):
     """Context manager for file locking using fcntl.flock."""
-    with open(lock_file, "w") as f:
+    f = None
+    try:
+        f = open(lock_file, "w")
         fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+        yield
+    except Exception as e:
+        logger.error(f"Error during file lock operation: {e}")
+        raise
+    finally:
+        if f:
+            try:
+                fcntl.flock(f, fcntl.LOCK_UN)
+            except:
+                pass  # Ignore unlock errors
+            try:
+                f.close()
+            except:
+                pass  # Ignore close errors
 
 class SystemResources:
     def __init__(self):

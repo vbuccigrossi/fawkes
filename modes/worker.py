@@ -75,9 +75,15 @@ def run_worker_mode(cfg):
                         bytes_received += len(chunk)
                 logger.debug(f"Received job package for {job_id}: {bytes_received} bytes")
 
-                # Unpack tarball
+                # Unpack tarball with path validation to prevent directory traversal
                 with tarfile.open(tar_path, "r:gz") as tar:
-                    tar.extractall(job_dir)
+                    for member in tar.getmembers():
+                        # Validate path to prevent directory traversal attacks
+                        member_path = os.path.normpath(member.name)
+                        if member_path.startswith("..") or member_path.startswith("/") or member_path.startswith("\\"):
+                            logger.warning(f"Skipping potentially malicious path in tarball: {member.name}")
+                            continue
+                        tar.extract(member, job_dir)
                 os.unlink(tar_path)
                 
                 # Update job_config with local paths
@@ -163,7 +169,11 @@ def run_worker_mode(cfg):
         db = FawkesDB(job_cfg["db_path"])
         job_cfg.db = db
         job_cfg.job_id = job_id
-        qemu_mgr = QemuManager(job_cfg, None)
+        # Create a VM registry for this worker job
+        from fawkes.config import VMRegistry
+        registry_path = os.path.join(os.path.dirname(job_cfg["db_path"]), f"registry_{job_id}.json")
+        registry = VMRegistry(registry_path)
+        qemu_mgr = QemuManager(job_cfg, registry)
         gdb_mgr = GdbFuzzManager(qemu_mgr, job_cfg.get("timeout", 60))
 
         harnesses = []

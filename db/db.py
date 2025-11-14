@@ -150,6 +150,16 @@ class FawkesDB:
         logger.info(f"New crash recorded: job_id={job_id}, crash_id={crash_id}, signature={signature}")
         return crash_id
 
+    def get_crashes(self, job_id: int) -> list:
+        """Get all crashes for a specific job."""
+        cur = self._conn.cursor()
+        cur.execute("""
+            SELECT crash_id, job_id, testcase_path, crash_type, details,
+                   signature, exploitability, crash_file, timestamp, duplicate_count
+            FROM crashes WHERE job_id = ?
+        """, (job_id,))
+        return cur.fetchall()
+
     # Testcases Management
     def add_testcase(self, job_id: int, vm_id: int, testcase_path: str, execution_time: Optional[float] = None):
         cur = self._conn.cursor()

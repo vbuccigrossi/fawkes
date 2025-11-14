@@ -3,6 +3,9 @@ import logging
 import shutil
 from pathlib import Path
 import time
+import json
+import zipfile
+from datetime import datetime
 from fawkes.nbd import NbdManager
 from fawkes.qemu import QemuManager
 from fawkes.config import FawkesConfig, VMRegistry

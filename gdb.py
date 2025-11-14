@@ -1,4 +1,5 @@
 # fawkes/gdb.py
+import errno
 import hashlib
 import threading
 import time
@@ -15,6 +16,20 @@ from fawkes.qemu import QemuManager
 from fawkes.db.db import FawkesDB
 
 class GdbFuzzWorker:
+    # GDB architecture mapping for different QEMU architectures
+    GDB_ARCH_MAP = {
+        "i386": "i386",
+        "x86_64": "i386:x86-64",
+        "aarch64": "aarch64",
+        "arm": "arm",
+        "mips": "mips",
+        "mipsel": "mips",
+        "sparc": "sparc",
+        "sparc64": "sparc:v9",
+        "ppc": "powerpc:common",
+        "ppc64": "powerpc:common64",
+    }
+
     def __init__(self, vm_id: int, qemu_mgr, timeout: int, fuzz_loop: bool = True):
         self.vm_id = vm_id
         self.qemu_mgr = qemu_mgr
@@ -40,20 +55,48 @@ class GdbFuzzWorker:
             time.sleep(0.1)
 
 
+    def _send_monitor_command(self, host: str, port: int, command: str, timeout: float = 2.0) -> bool:
+        """Send a command to QEMU monitor and return success status."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(timeout)
+                s.connect((host, port))
+                time.sleep(0.1)  # Wait for monitor prompt
+                s.recv(1024)  # Read initial prompt
+                s.sendall(f"{command}\n".encode('utf-8'))
+                time.sleep(0.1)
+                response = s.recv(1024).decode('utf-8', errors='ignore')
+                self.logger.debug(f"Monitor command '{command}' response: {response}")
+                return True
+        except Exception as e:
+            self.logger.error(f"Failed to send monitor command '{command}': {e}")
+            return False
+
     def start(self):
         """Start the GDB fuzz worker, checking both kernel and user-space crashes."""
         self.logger.info(f"Starting fuzz worker for VM {self.vm_id}, fuzz_loop={self.fuzz_loop}")
         with self.qemu_mgr.registry._lock:
             vm_info = self.qemu_mgr.registry.get_vm(self.vm_id)
             debug_port = vm_info["debug_port"]
+            monitor_port = vm_info.get("monitor_port")  # Get monitor port for fallback
             agent_port = vm_info["agent_port"]  # Get per-VM agent port
+            arch = vm_info.get("arch", "x86_64")  # Get architecture, default to x86_64
             if not debug_port or not agent_port:
                 self.logger.error(f"Missing debug_port ({debug_port}) or agent_port ({agent_port}) for VM {self.vm_id}")
                 return
 
-        # Prepare GDB script
+        # Map QEMU architecture to GDB architecture
+        gdb_arch = self.GDB_ARCH_MAP.get(arch, "auto")
+        self.logger.debug(f"Using GDB architecture '{gdb_arch}' for QEMU arch '{arch}'")
+
+        # Prepare enhanced GDB script with better state synchronization
+        # This helps with modern Windows (10+) HAL initialization
         gdb_script = (
             f"target remote 127.0.0.1:{debug_port}\n"
+            "set confirm off\n"
+            f"set architecture {gdb_arch}\n"
+            "set pagination off\n"
+            "info registers\n"      # Force GDB to sync with target state
             "continue\n"
         )
         with tempfile.NamedTemporaryFile(mode="w", suffix=".gdb", delete=False) as f:
@@ -75,6 +118,21 @@ class GdbFuzzWorker:
             self.logger.debug(f"GDB first line: {first_line!r}")
         except Exception as e:
             self.logger.error(f"Failed to start GDB (is it installed?) error: {e}")
+
+        # Wait a moment for GDB to execute its script
+        time.sleep(0.5)
+
+        # Use QEMU monitor as fallback to ensure VM continues
+        # This is especially important for modern Windows (10+) which may not
+        # respond properly to GDB continue commands alone
+        if monitor_port:
+            self.logger.debug(f"Sending 'cont' command via QEMU monitor on port {monitor_port}")
+            if self._send_monitor_command("127.0.0.1", monitor_port, "cont"):
+                self.logger.info(f"Successfully sent continue command via QEMU monitor for VM {self.vm_id}")
+            else:
+                self.logger.warning(f"Failed to send continue via monitor, relying on GDB only")
+        else:
+            self.logger.warning(f"No monitor port available for VM {self.vm_id}, relying on GDB only")
 
         # Monitor GDB and agent
         start_time = time.time()

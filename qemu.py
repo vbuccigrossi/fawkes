@@ -43,11 +43,15 @@ class QemuManager:
             "ppc": "qemu-system-ppc",
             "ppc64": "qemu-system-ppc64",
         }
-        
-        self.refresh_statuses()  # Check VM statuses on init
+
+        # Fix race condition: acquire lock before checking statuses
+        if self.registry:
+            self.refresh_statuses()  # Check VM statuses on init
 
     def refresh_statuses(self):
         """Update the status of all VMs based on PID aliveness."""
+        if not self.registry:
+            return
         with self.registry._lock:
             # Iterate over VM data (values), not VM IDs (keys)
             for vm in self.registry.vms.values():
@@ -111,9 +115,13 @@ class QemuManager:
             cmd += ["-nographic"]
 
         debug_port = None
+        monitor_port = None
         if debug:
             debug_port = pick_free_port()
+            monitor_port = pick_free_port()  # Add monitor port for VM control
             cmd += ["-gdb", f"tcp::{debug_port}"]
+            # Add QEMU monitor on TCP for programmatic control
+            cmd += ["-monitor", f"tcp:127.0.0.1:{monitor_port},server,nowait"]
             if pause_on_start:
                 cmd.append("-S")
 
@@ -123,11 +131,14 @@ class QemuManager:
 
         self.logger.debug(f"Starting QEMU with command: {' '.join(cmd)}")
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Capture stderr to check for errors properly
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
             time.sleep(1)
             if proc.poll() is not None:
-                stderr_output = proc.stderr.read().decode()
-                self.logger.debug(f"Qemu stderr output: {stderr_output}")
+                stderr_output = ""
+                if proc.stderr:
+                    stderr_output = proc.stderr.read().decode()
+                self.logger.debug(f"QEMU stderr output: {stderr_output}")
                 if "disk-only snapshot" in stderr_output:
                     error_msg = (
                         f"Snapshot '{snapshot_name}' is disk-only and cannot be loaded with -loadvm. "
@@ -148,6 +159,7 @@ class QemuManager:
                 "memory": memory,
                 "debug": debug,
                 "debug_port": debug_port,
+                "monitor_port": monitor_port,
                 "agent_port": agent_port,
                 "extra_opts": extra_opts or "",
                 "status": "Running",
@@ -196,23 +208,14 @@ class QemuManager:
    
     def stop_all(self) -> None:
         """Stop all running VMs and clean up."""
+        if not self.registry:
+            return
         with self.registry._lock:
             for vm_id, vm in list(self.registry.vms.items()):
                 if not isinstance(vm, dict):  # Skip "last_vm_id"
                     continue
                 if vm["status"] == "Running":
                     self.stop_vm(vm_id)
-            self.registry.save()
-
-    def refresh_statuses(self):
-        """Update the status of all VMs based on PID aliveness."""
-        with self.registry._lock:
-            for vm in self.registry.vms.values():  # Iterate VM data (dicts)
-                if not isinstance(vm, dict):  # Skip "last_vm_id"
-                    continue
-                if vm["status"] == "Running" and not is_pid_alive(vm["pid"]):
-                    vm["status"] = "Stopped"
-                    self.logger.debug(f"Updated VM {vm['id']} status to Stopped (PID {vm['pid']} not alive)")
             self.registry.save()
     
    # Snapshot management
@@ -247,6 +250,7 @@ class QemuManager:
             pid = vm_info["pid"]
             disk_path = vm_info["disk_path"]
             debug_port = vm_info["debug_port"]
+            monitor_port = vm_info.get("monitor_port")  # Get existing monitor port
             agent_port = vm_info["agent_port"]
             share_dir = vm_info["share_dir"]
             arch = vm_info["arch"]
@@ -274,7 +278,13 @@ class QemuManager:
         if not self.config.get("no_headless", False):
             cmd += ["-nographic"]
 
-        cmd += ["-gdb", f"tcp::{debug_port}", "-S"]
+        # Allocate new monitor port if not exists, or reuse existing
+        if not monitor_port:
+            monitor_port = pick_free_port()
+
+        cmd += ["-gdb", f"tcp::{debug_port}"]
+        cmd += ["-monitor", f"tcp:127.0.0.1:{monitor_port},server,nowait"]
+        cmd += ["-S"]
 
         vm_params = self.config.get("vm_params", False)
         if vm_params:
@@ -282,14 +292,18 @@ class QemuManager:
 
         self.logger.debug(f"Restarting VM {vm_id} with snapshot {snapshot_name}: {' '.join(cmd)}")
         try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
             time.sleep(1)
             if proc.poll() is not None:
-                self.logger.error(f"QEMU restart failed: {proc.stderr.read().decode()}")
+                stderr_output = ""
+                if proc.stderr:
+                    stderr_output = proc.stderr.read().decode()
+                self.logger.error(f"QEMU restart failed: {stderr_output}")
                 return
             with self.registry._lock:
                 vm_info["pid"] = proc.pid
                 vm_info["status"] = "Running"
+                vm_info["monitor_port"] = monitor_port  # Update monitor port
                 self.registry.save()
         except Exception as e:
             self.logger.error(f"Failed to restart VM {vm_id}: {e}", exc_info=True)
