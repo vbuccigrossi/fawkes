@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Optional, Dict, Any
 from fawkes.config import FawkesConfig, VMRegistry
+from fawkes.arch.architectures import SupportedArchitectures
 
 def pick_free_port():
     import socket
@@ -31,18 +32,9 @@ class QemuManager:
         self.config = config
         self.registry = registry
         self.logger = logging.getLogger("fawkes.QemuManager")
-        self.qemu_binaries = {
-            "i386": "qemu-system-i386",
-            "x86_64": "qemu-system-x86_64",
-            "aarch64": "qemu-system-aarch64",
-            "mips": "qemu-system-mips",
-            "mipsel": "qemu-system-mipsel",
-            "sparc": "qemu-system-sparc",
-            "sparc64": "qemu-system-sparc64",
-            "arm": "qemu-system-arm",
-            "ppc": "qemu-system-ppc",
-            "ppc64": "qemu-system-ppc64",
-        }
+
+        # Use comprehensive architecture support
+        self.supported_archs = SupportedArchitectures
 
         # Fix race condition: acquire lock before checking statuses
         if self.registry:
@@ -84,9 +76,10 @@ class QemuManager:
         self.logger.debug(f"Created share directory for at {sub_dir}")
 
         arch = self.config.get("arch", "x86_64")
-        qemu_binary = self.qemu_binaries.get(arch)
+        qemu_binary = self.supported_archs.get_qemu_binary(arch)
         if not qemu_binary:
             self.logger.error(f"Unsupported architecture: {arch}")
+            self.logger.error(f"Supported architectures: {', '.join(self.supported_archs.list_architectures())}")
             shutil.rmtree(temp_dir, ignore_errors=True)
             return None
 
@@ -260,8 +253,13 @@ class QemuManager:
             self.stop_vm(vm_id, force=False)
 
         # Restart with snapshot
+        qemu_binary = self.supported_archs.get_qemu_binary(arch)
+        if not qemu_binary:
+            self.logger.error(f"Unsupported architecture for restart: {arch}")
+            return
+
         cmd = [
-            self.qemu_binaries[arch], "-drive", f"file={disk_path},format=qcow2",
+            qemu_binary, "-drive", f"file={disk_path},format=qcow2",
             "-loadvm", snapshot_name,
         ]
 

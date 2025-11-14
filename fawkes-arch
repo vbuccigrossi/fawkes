@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""
+Fawkes Architecture Management Tool
+
+List, validate, and get information about supported architectures.
+"""
+
+import sys
+import os
+import argparse
+from pathlib import Path
+from tabulate import tabulate
+
+# Add parent directory to path
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir))
+
+from fawkes.arch.architectures import SupportedArchitectures
+
+
+def cmd_list(args):
+    """List all supported architectures"""
+    archs = SupportedArchitectures.ARCHITECTURES
+
+    if args.family:
+        families = SupportedArchitectures.get_architecture_families()
+        if args.family not in families:
+            print(f"Unknown family: {args.family}")
+            print(f"Available families: {', '.join(families.keys())}")
+            return
+
+        arch_list = families[args.family]
+        print(f"\n{args.family} Family Architectures:")
+        print("=" * 80)
+        filtered_archs = {k: v for k, v in archs.items() if k in arch_list}
+    else:
+        filtered_archs = archs
+
+    if args.format == "table":
+        table_data = []
+        for name, info in sorted(filtered_archs.items()):
+            table_data.append([
+                name,
+                info.word_size,
+                info.endianness,
+                info.qemu_binary,
+                info.description[:40] + "..." if len(info.description) > 40 else info.description
+            ])
+
+        headers = ["Architecture", "Bits", "Endian", "QEMU Binary", "Description"]
+        print(tabulate(table_data, headers=headers, tablefmt="grid"))
+        print(f"\nTotal: {len(filtered_archs)} architectures")
+
+    elif args.format == "simple":
+        for name in sorted(filtered_archs.keys()):
+            print(name)
+
+    elif args.format == "json":
+        import json
+        data = {}
+        for name, info in filtered_archs.items():
+            data[name] = {
+                "qemu_binary": info.qemu_binary,
+                "gdb_arch": info.gdb_arch,
+                "word_size": info.word_size,
+                "endianness": info.endianness,
+                "description": info.description,
+                "aliases": info.aliases or []
+            }
+        print(json.dumps(data, indent=2))
+
+
+def cmd_info(args):
+    """Show detailed information about an architecture"""
+    arch_info = SupportedArchitectures.get_architecture(args.architecture)
+
+    if not arch_info:
+        print(f"Architecture '{args.architecture}' not found")
+        print(f"\nDid you mean one of these?")
+        # Find similar architectures
+        similar = [a for a in SupportedArchitectures.list_architectures()
+                  if args.architecture.lower() in a.lower()]
+        for s in similar[:5]:
+            print(f"  - {s}")
+        return
+
+    print(f"\n{'=' * 80}")
+    print(f"ARCHITECTURE: {arch_info.name}")
+    print(f"{'=' * 80}\n")
+
+    print(f"Description: {arch_info.description}")
+    print(f"Word Size: {arch_info.word_size}-bit")
+    print(f"Endianness: {arch_info.endianness}-endian")
+    print(f"QEMU Binary: {arch_info.qemu_binary}")
+    print(f"GDB Architecture: {arch_info.gdb_arch}")
+
+    if arch_info.aliases:
+        print(f"Aliases: {', '.join(arch_info.aliases)}")
+
+    print(f"\nRegisters:")
+    print(f"  Program Counter: {arch_info.registers.program_counter}")
+    print(f"  Stack Pointer: {arch_info.registers.stack_pointer}")
+    print(f"  Frame Pointer: {arch_info.registers.frame_pointer}")
+    print(f"  Return Register: {arch_info.registers.return_register}")
+
+    print(f"\nGeneral Purpose Registers ({len(arch_info.registers.general_purpose)}):")
+    # Print in columns
+    regs = arch_info.registers.general_purpose
+    cols = 8
+    for i in range(0, len(regs), cols):
+        print(f"  {' '.join(f'{r:10s}' for r in regs[i:i+cols])}")
+
+    print(f"\nArgument Registers:")
+    print(f"  {', '.join(arch_info.registers.arguments)}")
+
+    print(f"\n{'=' * 80}\n")
+
+
+def cmd_validate(args):
+    """Validate if an architecture is supported"""
+    is_valid = SupportedArchitectures.validate_architecture(args.architecture)
+
+    if is_valid:
+        arch_info = SupportedArchitectures.get_architecture(args.architecture)
+        print(f"✓ Architecture '{args.architecture}' is supported")
+        print(f"  QEMU Binary: {arch_info.qemu_binary}")
+        print(f"  GDB Arch: {arch_info.gdb_arch}")
+        sys.exit(0)
+    else:
+        print(f"✗ Architecture '{args.architecture}' is NOT supported")
+        print(f"\nSupported architectures: {', '.join(SupportedArchitectures.list_architectures()[:10])} ...")
+        sys.exit(1)
+
+
+def cmd_families(args):
+    """List architecture families"""
+    families = SupportedArchitectures.get_architecture_families()
+
+    print("\nArchitecture Families:")
+    print("=" * 80)
+
+    for family, archs in sorted(families.items()):
+        print(f"\n{family} ({len(archs)} architectures):")
+        for arch in archs:
+            arch_info = SupportedArchitectures.get_architecture(arch)
+            print(f"  - {arch:15s} {arch_info.word_size}-bit {arch_info.endianness:6s} {arch_info.description}")
+
+
+def cmd_detect(args):
+    """Detect architecture from QEMU binary name"""
+    if args.binary.startswith("qemu-system-"):
+        arch_name = args.binary.replace("qemu-system-", "")
+    else:
+        arch_name = args.binary
+
+    arch_info = SupportedArchitectures.get_architecture(arch_name)
+    if arch_info:
+        print(f"Detected architecture: {arch_info.name}")
+        print(f"Description: {arch_info.description}")
+    else:
+        print(f"Could not detect architecture from '{args.binary}'")
+        sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Fawkes Architecture Management - Query and validate supported architectures"
+    )
+
+    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
+
+    # List command
+    list_parser = subparsers.add_parser('list', help='List all supported architectures')
+    list_parser.add_argument('--family', type=str,
+                            help='Filter by architecture family (x86, ARM, MIPS, etc.)')
+    list_parser.add_argument('--format', choices=['table', 'simple', 'json'],
+                            default='table',
+                            help='Output format (default: table)')
+
+    # Info command
+    info_parser = subparsers.add_parser('info', help='Show detailed architecture information')
+    info_parser.add_argument('architecture', help='Architecture name')
+
+    # Validate command
+    validate_parser = subparsers.add_parser('validate', help='Validate if architecture is supported')
+    validate_parser.add_argument('architecture', help='Architecture name to validate')
+
+    # Families command
+    families_parser = subparsers.add_parser('families', help='List architecture families')
+
+    # Detect command
+    detect_parser = subparsers.add_parser('detect', help='Detect architecture from QEMU binary name')
+    detect_parser.add_argument('binary', help='QEMU binary name (e.g., qemu-system-aarch64)')
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    try:
+        if args.command == 'list':
+            cmd_list(args)
+        elif args.command == 'info':
+            cmd_info(args)
+        elif args.command == 'validate':
+            cmd_validate(args)
+        elif args.command == 'families':
+            cmd_families(args)
+        elif args.command == 'detect':
+            cmd_detect(args)
+
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+        sys.exit(130)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

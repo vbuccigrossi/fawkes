@@ -14,22 +14,9 @@ from typing import Dict, Any, Optional
 from fawkes.config import FawkesConfig, VMRegistry
 from fawkes.qemu import QemuManager
 from fawkes.db.db import FawkesDB
+from fawkes.arch.architectures import SupportedArchitectures
 
 class GdbFuzzWorker:
-    # GDB architecture mapping for different QEMU architectures
-    GDB_ARCH_MAP = {
-        "i386": "i386",
-        "x86_64": "i386:x86-64",
-        "aarch64": "aarch64",
-        "arm": "arm",
-        "mips": "mips",
-        "mipsel": "mips",
-        "sparc": "sparc",
-        "sparc64": "sparc:v9",
-        "ppc": "powerpc:common",
-        "ppc64": "powerpc:common64",
-    }
-
     def __init__(self, vm_id: int, qemu_mgr, timeout: int, fuzz_loop: bool = True):
         self.vm_id = vm_id
         self.qemu_mgr = qemu_mgr
@@ -38,6 +25,7 @@ class GdbFuzzWorker:
         self.logger = logging.getLogger(f"fawkes.GdbFuzzWorker-{vm_id}")
         self.crash_detected = False
         self.crash_info = {}
+        self.supported_archs = SupportedArchitectures
         self.logger.debug(f"Initialized with timeout={self.timeout}")
 
 
@@ -85,8 +73,11 @@ class GdbFuzzWorker:
                 self.logger.error(f"Missing debug_port ({debug_port}) or agent_port ({agent_port}) for VM {self.vm_id}")
                 return
 
-        # Map QEMU architecture to GDB architecture
-        gdb_arch = self.GDB_ARCH_MAP.get(arch, "auto")
+        # Map QEMU architecture to GDB architecture using comprehensive support
+        gdb_arch = self.supported_archs.get_gdb_arch(arch)
+        if not gdb_arch:
+            self.logger.warning(f"Unknown GDB architecture for '{arch}', using 'auto'")
+            gdb_arch = "auto"
         self.logger.debug(f"Using GDB architecture '{gdb_arch}' for QEMU arch '{arch}'")
 
         # Prepare enhanced GDB script with better state synchronization
