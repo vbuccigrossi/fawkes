@@ -1,0 +1,25 @@
+# Fawkes Secure Scheduled Worker Configuration
+# Worker with heartbeat and scheduler integration
+
+# Authentication and Encryption
+auth_enabled: true
+tls_enabled: true
+
+# Authentication database path
+auth_db_path: ~/.fawkes/auth.db
+
+# TLS Certificate paths
+# tls_cert: ~/.fawkes/certs/fawkes.crt
+# tls_key: ~/.fawkes/certs/fawkes.key
+
+# Network configuration
+controller_host: 0.0.0.0
+controller_port: 9999
+
+# Worker tags for scheduler (optional)
+worker_tags:
+  - production
+  - x86_64
+
+# Logging level
+log_level: INFO

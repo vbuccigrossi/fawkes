@@ -1,0 +1,40 @@
+# Fawkes Secure Scheduled Controller Configuration
+# Uses advanced scheduler with authentication and TLS
+
+# Authentication and Encryption
+auth_enabled: true
+tls_enabled: true
+
+# API key for controller authentication
+controller_api_key: "REPLACE_WITH_YOUR_API_KEY"
+
+# TLS Certificate paths
+# tls_cert: ~/.fawkes/certs/fawkes.crt
+# tls_key: ~/.fawkes/certs/fawkes.key
+
+# Scheduler database path
+controller_db_path: ~/.fawkes/scheduler.db
+
+# Scheduler configuration
+allocation_strategy: load_aware  # Options: load_aware, round_robin, first_fit
+heartbeat_timeout: 90  # Seconds before marking worker offline
+
+# Worker nodes with capabilities (optional)
+workers:
+  - ip: 192.168.1.10
+    hostname: worker-01
+    tags:
+      - gpu
+      - high-cpu
+  - ip: 192.168.1.11
+    hostname: worker-02
+    tags:
+      - high-memory
+  - ip: 192.168.1.12
+    hostname: worker-03
+
+# Polling interval (seconds)
+poll_interval: 30
+
+# Logging level
+log_level: INFO

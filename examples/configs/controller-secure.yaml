@@ -1,0 +1,32 @@
+# Fawkes Secure Controller Configuration
+# This configuration enables authentication and TLS encryption
+
+# Authentication and Encryption
+auth_enabled: true
+tls_enabled: true
+
+# API key for controller authentication (generate with: ./fawkes-auth key create controller)
+# IMPORTANT: Replace this with your actual API key
+controller_api_key: "REPLACE_WITH_YOUR_API_KEY"
+
+# TLS Certificate paths (auto-generated if not specified)
+# tls_cert: ~/.fawkes/certs/fawkes.crt
+# tls_key: ~/.fawkes/certs/fawkes.key
+
+# Database path
+controller_db_path: ~/.fawkes/controller.db
+
+# Worker nodes (IP addresses or hostnames)
+workers:
+  - 192.168.1.10
+  - 192.168.1.11
+  - 192.168.1.12
+
+# Job directory to monitor for new jobs
+job_dir: ~/.fawkes/jobs/
+
+# Polling interval (seconds)
+poll_interval: 60
+
+# Logging level
+log_level: INFO

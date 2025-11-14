@@ -1,0 +1,25 @@
+# Fawkes Secure Worker Configuration
+# This configuration enables authentication and TLS encryption
+
+# Authentication and Encryption
+auth_enabled: true
+tls_enabled: true
+
+# Authentication database path
+auth_db_path: ~/.fawkes/auth.db
+
+# TLS Certificate paths (must match controller certificates)
+# tls_cert: ~/.fawkes/certs/fawkes.crt
+# tls_key: ~/.fawkes/certs/fawkes.key
+
+# Network configuration
+controller_host: 0.0.0.0  # Listen on all interfaces
+controller_port: 9999
+
+# Logging level
+log_level: INFO
+
+# Worker tags (optional, for scheduler-based mode)
+# worker_tags:
+#   - gpu
+#   - high-memory
