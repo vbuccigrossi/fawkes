@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""
+Fawkes Crash Triage Tool
+
+Perform advanced crash analysis and generate comprehensive reports.
+"""
+
+import sys
+import os
+import argparse
+import logging
+from pathlib import Path
+
+# Add parent directory to path
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir))
+
+from fawkes.analysis.enhanced_triage import EnhancedTriageEngine, Severity
+from fawkes.analysis.report_generator import ReportGenerator, generate_summary_report
+from fawkes.db.db import FawkesDB
+
+
+def setup_logging(level=logging.INFO):
+    """Setup logging configuration"""
+    logging.basicConfig(
+        level=level,
+        format='[%(asctime)s] %(levelname)s: %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    return logging.getLogger("fawkes.triage.cli")
+
+
+def triage_crash_zip(crash_zip: str, args):
+    """Triage a single crash from zip file"""
+    logger = logging.getLogger("fawkes.triage.cli")
+
+    if not os.path.exists(crash_zip):
+        logger.error(f"Crash zip not found: {crash_zip}")
+        return None
+
+    logger.info(f"Analyzing crash: {crash_zip}")
+
+    # Create triage engine
+    engine = EnhancedTriageEngine()
+
+    # Analyze crash
+    analysis = engine.analyze_crash(crash_zip)
+
+    # Generate reports
+    if not args.no_report:
+        logger.info("Generating reports...")
+        report_gen = ReportGenerator(args.report_dir)
+
+        formats = []
+        if args.text:
+            formats.append('text')
+        if args.json:
+            formats.append('json')
+        if args.markdown:
+            formats.append('markdown')
+
+        if not formats:  # Default to all
+            formats = ['text', 'json', 'markdown']
+
+        saved_files = report_gen.save_report(analysis, formats)
+
+        for fmt, path in saved_files.items():
+            logger.info(f"  {fmt.upper()}: {path}")
+
+    # Display summary
+    if not args.quiet:
+        print("\n" + "=" * 80)
+        print("CRASH TRIAGE SUMMARY")
+        print("=" * 80)
+        print(f"Crash: {os.path.basename(crash_zip)}")
+        print(f"Severity: {analysis.severity.value}")
+        print(f"Exploitability: {analysis.exploitability_score}/100")
+        print(f"Vulnerability: {analysis.vuln_type.value}")
+        print(f"Confidence: {analysis.confidence * 100:.1f}%")
+
+        if analysis.indicators:
+            print(f"\nExploit Indicators:")
+            for indicator in analysis.indicators:
+                print(f"  • {indicator}")
+
+        if analysis.root_cause:
+            print(f"\nRoot Cause: {analysis.root_cause}")
+
+        if analysis.suggested_fix:
+            print(f"\nSuggested Fix: {analysis.suggested_fix}")
+
+        print("=" * 80 + "\n")
+
+    return analysis
+
+
+def triage_crash_id(crash_id: int, args):
+    """Triage a crash from database by ID"""
+    logger = logging.getLogger("fawkes.triage.cli")
+
+    logger.info(f"Loading crash {crash_id} from database")
+
+    # Load from database
+    db = FawkesDB(args.db_path)
+    try:
+        cursor = db._conn.cursor()
+        cursor.execute("""
+            SELECT crash_file, testcase_path, crash_type, details
+            FROM crashes WHERE crash_id = ?
+        """, (crash_id,))
+
+        row = cursor.fetchone()
+        if not row:
+            logger.error(f"Crash ID {crash_id} not found in database")
+            return None
+
+        crash_file = row[0]
+        if crash_file and os.path.exists(crash_file):
+            return triage_crash_zip(crash_file, args)
+        else:
+            logger.error(f"Crash file not found: {crash_file}")
+            return None
+
+    finally:
+        db.close()
+
+
+def triage_directory(directory: str, args):
+    """Triage all crashes in a directory"""
+    logger = logging.getLogger("fawkes.triage.cli")
+
+    if not os.path.exists(directory):
+        logger.error(f"Directory not found: {directory}")
+        return []
+
+    # Find all crash zips
+    crash_zips = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.zip') and ('crash' in file.lower() or 'unique' in root):
+                crash_zips.append(os.path.join(root, file))
+
+    if not crash_zips:
+        logger.warning(f"No crash zips found in {directory}")
+        return []
+
+    logger.info(f"Found {len(crash_zips)} crash files")
+
+    # Analyze each crash
+    analyses = []
+    for i, crash_zip in enumerate(crash_zips, 1):
+        logger.info(f"[{i}/{len(crash_zips)}] Analyzing {os.path.basename(crash_zip)}...")
+        try:
+            analysis = triage_crash_zip(crash_zip, args)
+            if analysis:
+                analyses.append(analysis)
+        except Exception as e:
+            logger.error(f"Error analyzing {crash_zip}: {e}")
+
+    # Generate summary report
+    if analyses and not args.no_summary:
+        logger.info("\nGenerating summary report...")
+        summary_path = os.path.join(args.report_dir, f"crash_summary_{len(analyses)}_crashes.txt")
+        summary_text = generate_summary_report(analyses, summary_path)
+
+        if not args.quiet:
+            print("\n" + summary_text)
+
+        logger.info(f"Summary report saved to: {summary_path}")
+
+    return analyses
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Fawkes Crash Triage - Advanced crash analysis and reporting"
+    )
+
+    # Input options (mutually exclusive)
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument('--crash-zip', type=str, help='Path to crash archive zip file')
+    input_group.add_argument('--crash-id', type=int, help='Crash ID from database')
+    input_group.add_argument('--directory', type=str, help='Directory containing crash zips')
+
+    # Output options
+    parser.add_argument('--report-dir', default='~/.fawkes/reports',
+                        help='Directory for saving reports (default: ~/.fawkes/reports)')
+    parser.add_argument('--no-report', action='store_true',
+                        help='Skip report generation')
+    parser.add_argument('--no-summary', action='store_true',
+                        help='Skip summary report (directory mode only)')
+
+    # Format options
+    parser.add_argument('--text', action='store_true', help='Generate text report')
+    parser.add_argument('--json', action='store_true', help='Generate JSON report')
+    parser.add_argument('--markdown', action='store_true', help='Generate Markdown report')
+
+    # Database options
+    parser.add_argument('--db-path', default='~/.fawkes/fawkes.db',
+                        help='Path to Fawkes database (default: ~/.fawkes/fawkes.db)')
+
+    # Display options
+    parser.add_argument('--quiet', action='store_true',
+                        help='Suppress console output')
+    parser.add_argument('--log-level', default='INFO',
+                        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                        help='Logging level')
+
+    # Filter options (for directory mode)
+    parser.add_argument('--min-severity', type=str,
+                        choices=['INFO', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'],
+                        help='Only show crashes above this severity')
+    parser.add_argument('--min-score', type=int,
+                        help='Only show crashes with exploitability >= this score')
+
+    args = parser.parse_args()
+
+    # Setup logging
+    log_level = getattr(logging, args.log_level.upper())
+    logger = setup_logging(log_level)
+
+    # Expand paths
+    args.report_dir = os.path.expanduser(args.report_dir)
+    args.db_path = os.path.expanduser(args.db_path)
+
+    # Create report directory
+    os.makedirs(args.report_dir, exist_ok=True)
+
+    try:
+        # Execute appropriate mode
+        if args.crash_zip:
+            analysis = triage_crash_zip(args.crash_zip, args)
+            exit_code = 0 if analysis else 1
+
+        elif args.crash_id:
+            analysis = triage_crash_id(args.crash_id, args)
+            exit_code = 0 if analysis else 1
+
+        elif args.directory:
+            analyses = triage_directory(args.directory, args)
+
+            # Apply filters if specified
+            if args.min_severity or args.min_score:
+                severity_order = {
+                    Severity.INFO: 0,
+                    Severity.LOW: 1,
+                    Severity.MEDIUM: 2,
+                    Severity.HIGH: 3,
+                    Severity.CRITICAL: 4
+                }
+
+                if args.min_severity:
+                    min_sev = Severity(args.min_severity.capitalize())
+                    min_sev_level = severity_order[min_sev]
+                    analyses = [a for a in analyses if severity_order[a.severity] >= min_sev_level]
+                    logger.info(f"Filtered to {len(analyses)} crashes >= {min_sev.value} severity")
+
+                if args.min_score:
+                    analyses = [a for a in analyses if a.exploitability_score >= args.min_score]
+                    logger.info(f"Filtered to {len(analyses)} crashes with score >= {args.min_score}")
+
+            exit_code = 0 if analyses else 1
+
+        logger.info("Triage complete!")
+        sys.exit(exit_code)
+
+    except KeyboardInterrupt:
+        logger.info("\nTriage interrupted by user")
+        sys.exit(130)
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}", exc_info=True)
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
