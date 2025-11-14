@@ -7,11 +7,15 @@ import os
 import json
 import time
 import tarfile
+import ssl
 from fawkes.globals import shutdown_event, SystemResources
 from fawkes.qemu import QemuManager
 from fawkes.gdb import GdbFuzzManager
 from fawkes.db.db import FawkesDB
+from fawkes.db.auth_db import AuthDB
 from fawkes.harness import FileFuzzHarness
+from fawkes.auth.middleware import authenticate_request, AuthenticationError, create_auth_response
+from fawkes.auth.tls import create_ssl_context, ensure_certificates
 
 def run_worker_mode(cfg):
     """Run Fawkes in worker mode, handling distributed fuzzing tasks from the controller."""
@@ -25,6 +29,34 @@ def run_worker_mode(cfg):
     # Network setup from config
     host = cfg.get("controller_host", "0.0.0.0")
     port = cfg.get("controller_port", 9999)
+
+    auth_enabled = cfg.get("auth_enabled", False)
+    tls_enabled = cfg.get("tls_enabled", False)
+
+    # Initialize authentication database if enabled
+    auth_db = None
+    if auth_enabled:
+        auth_db_path = os.path.expanduser(cfg.get("auth_db_path", "~/.fawkes/auth.db"))
+        auth_db = AuthDB(auth_db_path)
+        logger.info("Authentication: ENABLED")
+
+    # Initialize TLS if enabled
+    ssl_context = None
+    if tls_enabled:
+        try:
+            cert_file, key_file = ensure_certificates(
+                cfg.get("tls_cert"),
+                cfg.get("tls_key")
+            )
+            ssl_context = create_ssl_context(
+                cert_file=cert_file,
+                key_file=key_file,
+                is_server=True
+            )
+            logger.info("TLS encryption: ENABLED")
+        except Exception as e:
+            logger.error(f"Failed to initialize TLS: {e}")
+            return
 
     # Start TCP server
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -40,9 +72,14 @@ def run_worker_mode(cfg):
     def handle_connection(conn, addr):
         """Handle incoming connections from the controller."""
         try:
+            # Wrap with TLS if enabled
+            if tls_enabled and ssl_context:
+                conn = ssl_context.wrap_socket(conn, server_side=True)
+                logger.debug(f"Established TLS connection from {addr}")
+
             # Receive message length
             msg_len = int.from_bytes(conn.recv(4), byteorder="big")
-            
+
             # Receive JSON message
             msg_data = b""
             while len(msg_data) < msg_len:
@@ -51,7 +88,20 @@ def run_worker_mode(cfg):
                     raise ConnectionError("Connection closed prematurely")
                 msg_data += chunk
             msg = json.loads(msg_data.decode())
-            logger.debug(f"Received message from {addr}: {msg['type']}")
+            logger.debug(f"Received message from {addr}: {msg.get('type')}")
+
+            # Authenticate request if enabled
+            if auth_enabled and auth_db:
+                try:
+                    principal = authenticate_request(auth_db, msg)
+                    logger.debug(f"Authenticated: {principal.get('key_name') or principal.get('username')}")
+                except AuthenticationError as e:
+                    logger.warning(f"Authentication failed from {addr}: {e}")
+                    error_response = create_auth_response(False, str(e))
+                    error_data = json.dumps(error_response).encode()
+                    conn.send(len(error_data).to_bytes(4, byteorder="big"))
+                    conn.send(error_data)
+                    return
 
             if msg["type"] == "PUSH_JOB":
                 job_id = msg["job_id"]

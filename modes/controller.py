@@ -6,16 +6,24 @@ import os
 import glob
 import tarfile
 import tempfile
+import ssl
 from pathlib import Path
 from fawkes.db.controller_db import ControllerDB
+from fawkes.db.auth_db import AuthDB
 from fawkes.globals import shutdown_event
+from fawkes.auth.middleware import add_authentication, AuthenticationError
+from fawkes.auth.tls import create_ssl_context, ensure_certificates
 
 logger = logging.getLogger("fawkes")
 CONTROLLER_PORT = 9999
 
-def push_job_to_worker(worker_ip: str, job_config: dict):
+def push_job_to_worker(worker_ip: str, job_config: dict, cfg: dict = None):
     """Send job configuration, VM image, and test cases to a worker."""
     sock = None
+    cfg = cfg or {}
+    auth_enabled = cfg.get("auth_enabled", False)
+    tls_enabled = cfg.get("tls_enabled", False)
+
     try:
         with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as temp_tar:
             tar_path = temp_tar.name
@@ -26,7 +34,7 @@ def push_job_to_worker(worker_ip: str, job_config: dict):
                     return False
                 tar.add(disk_image, arcname=os.path.basename(disk_image))
                 logger.debug(f"Added VM image to tar: {disk_image}")
-                
+
                 input_dir = os.path.expanduser(job_config.get("input_dir"))
                 if not os.path.isdir(input_dir):
                     logger.error(f"Input directory not found: {input_dir}")
@@ -45,12 +53,39 @@ def push_job_to_worker(worker_ip: str, job_config: dict):
         sock.settimeout(10)
         sock.connect((worker_ip, CONTROLLER_PORT))
 
+        # Wrap with TLS if enabled
+        if tls_enabled:
+            try:
+                cert_file, key_file = ensure_certificates(
+                    cfg.get("tls_cert"),
+                    cfg.get("tls_key")
+                )
+                ssl_context = create_ssl_context(
+                    cert_file=cert_file,
+                    key_file=key_file,
+                    is_server=False
+                )
+                sock = ssl_context.wrap_socket(sock, server_hostname=worker_ip)
+                logger.debug(f"Established TLS connection to {worker_ip}")
+            except Exception as e:
+                logger.error(f"TLS handshake failed with {worker_ip}: {e}")
+                raise
+
         msg = {
             "type": "PUSH_JOB",
             "job_id": job_config["job_id"],
             "config": job_config,
             "package_size": tar_size
         }
+
+        # Add authentication if enabled
+        if auth_enabled:
+            api_key = cfg.get("controller_api_key")
+            if not api_key:
+                logger.error("Authentication enabled but no controller_api_key configured")
+                return False
+            msg = add_authentication(msg, "api_key", api_key)
+
         msg_data = json.dumps(msg).encode()
         sock.send(len(msg_data).to_bytes(4, byteorder="big"))
         sock.send(msg_data)
@@ -100,7 +135,7 @@ def check_for_new_jobs(db, cfg):
         if available_workers:
             worker = available_workers[0]
             db.assign_job_to_worker(job_config["job_id"], worker["worker_id"])
-            push_job_to_worker(worker["ip_address"], job_config)
+            push_job_to_worker(worker["ip_address"], job_config, cfg)
             logger.info(f"Assigned job {job_config['job_id']} to worker {worker['ip_address']}")
         os.remove(job_file)
 
@@ -109,11 +144,36 @@ def run_controller_mode(cfg):
     db_path = os.path.expanduser(cfg.get("controller_db_path", "~/.fawkes/controller.db"))
     db = ControllerDB(db_path)
 
+    auth_enabled = cfg.get("auth_enabled", False)
+    tls_enabled = cfg.get("tls_enabled", False)
+
+    # Initialize TLS if enabled
+    ssl_context = None
+    if tls_enabled:
+        try:
+            cert_file, key_file = ensure_certificates(
+                cfg.get("tls_cert"),
+                cfg.get("tls_key")
+            )
+            ssl_context = create_ssl_context(
+                cert_file=cert_file,
+                key_file=key_file,
+                is_server=False
+            )
+            logger.info("TLS enabled for controller")
+        except Exception as e:
+            logger.error(f"Failed to initialize TLS: {e}")
+            return
+
     workers = cfg.get("workers", [])
     for worker_ip in workers:
         db.add_worker(worker_ip)
 
     logger.info("Controller started")
+    if auth_enabled:
+        logger.info("Authentication: ENABLED")
+    if tls_enabled:
+        logger.info("TLS encryption: ENABLED")
 
     while not shutdown_event.is_set():
         for worker in db.get_workers():
@@ -123,8 +183,19 @@ def run_controller_mode(cfg):
                 sock.settimeout(5)
                 sock.connect((worker["ip_address"], CONTROLLER_PORT))
 
+                # Wrap with TLS if enabled
+                if tls_enabled and ssl_context:
+                    sock = ssl_context.wrap_socket(sock, server_hostname=worker["ip_address"])
+
                 # Request status
                 status_msg = {"type": "STATUS_REQUEST"}
+
+                # Add authentication if enabled
+                if auth_enabled:
+                    api_key = cfg.get("controller_api_key")
+                    if api_key:
+                        status_msg = add_authentication(status_msg, "api_key", api_key)
+
                 status_data = json.dumps(status_msg).encode()
                 sock.send(len(status_data).to_bytes(4, byteorder="big"))
                 sock.send(status_data)
@@ -142,6 +213,13 @@ def run_controller_mode(cfg):
                 # Request crashes for each running job
                 for job_id in status.get("status", {}):
                     crash_msg = {"type": "CRASH_REQUEST", "job_id": job_id}
+
+                    # Add authentication if enabled
+                    if auth_enabled:
+                        api_key = cfg.get("controller_api_key")
+                        if api_key:
+                            crash_msg = add_authentication(crash_msg, "api_key", api_key)
+
                     crash_data = json.dumps(crash_msg).encode()
                     sock.send(len(crash_data).to_bytes(4, byteorder="big"))
                     sock.send(crash_data)
