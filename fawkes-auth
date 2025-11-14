@@ -1,0 +1,608 @@
+#!/usr/bin/env python3
+"""
+Fawkes Authentication CLI
+
+Manage users, API keys, roles, and permissions for Fawkes distributed fuzzing.
+"""
+
+import sys
+import os
+import argparse
+import logging
+import getpass
+from pathlib import Path
+from tabulate import tabulate
+from datetime import datetime
+
+# Add parent directory to path
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir))
+
+from fawkes.db.auth_db import AuthDB
+from fawkes.auth.tls import generate_self_signed_cert, ensure_certificates, verify_certificate
+
+
+def setup_logging(level=logging.INFO):
+    """Setup logging configuration"""
+    logging.basicConfig(
+        level=level,
+        format='[%(asctime)s] %(levelname)s: %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    return logging.getLogger("fawkes.auth.cli")
+
+
+def cmd_init(args, db):
+    """Initialize authentication system"""
+    logger = logging.getLogger("fawkes.auth.cli")
+
+    # Check if admin user already exists
+    admin = db.get_user(username="admin")
+    if admin:
+        print("Authentication system already initialized.")
+        print(f"Admin user exists: {admin['username']}")
+        return 0
+
+    print("Initializing Fawkes authentication system...")
+    print()
+
+    # Prompt for admin password
+    while True:
+        password = getpass.getpass("Set admin password: ")
+        password_confirm = getpass.getpass("Confirm admin password: ")
+
+        if password != password_confirm:
+            print("Passwords do not match. Try again.")
+            continue
+
+        if len(password) < 8:
+            print("Password must be at least 8 characters. Try again.")
+            continue
+
+        break
+
+    # Create admin user
+    admin_id = db.create_user(
+        username="admin",
+        password=password,
+        role="admin",
+        full_name="System Administrator"
+    )
+
+    print()
+    print(f"✓ Created admin user (ID: {admin_id})")
+
+    # Generate TLS certificates if requested
+    if not args.skip_certs:
+        cert_file, key_file = ensure_certificates()
+        print(f"✓ Generated TLS certificate: {cert_file}")
+        print(f"✓ Generated TLS private key: {key_file}")
+
+    print()
+    print("Authentication system initialized successfully!")
+    print()
+    print("Next steps:")
+    print("  1. Create additional users: ./fawkes-auth user add <username>")
+    print("  2. Create API keys for workers: ./fawkes-auth key create <key-name>")
+    print("  3. Enable authentication in controller/worker configs")
+
+    return 0
+
+
+def cmd_user_add(args, db):
+    """Add a new user"""
+    logger = logging.getLogger("fawkes.auth.cli")
+
+    # Check if user already exists
+    existing = db.get_user(username=args.username)
+    if existing:
+        print(f"Error: User '{args.username}' already exists")
+        return 1
+
+    # Prompt for password unless provided
+    if args.password:
+        password = args.password
+    else:
+        while True:
+            password = getpass.getpass(f"Password for {args.username}: ")
+            password_confirm = getpass.getpass("Confirm password: ")
+
+            if password != password_confirm:
+                print("Passwords do not match. Try again.")
+                continue
+
+            if len(password) < 8:
+                print("Password must be at least 8 characters. Try again.")
+                continue
+
+            break
+
+    # Create user
+    user_id = db.create_user(
+        username=args.username,
+        password=password,
+        role=args.role,
+        email=args.email,
+        full_name=args.full_name
+    )
+
+    print(f"✓ Created user: {args.username} (ID: {user_id}, Role: {args.role})")
+    return 0
+
+
+def cmd_user_list(args, db):
+    """List all users"""
+    users = db.list_users()
+
+    if not users:
+        print("No users found")
+        return 0
+
+    table_data = []
+    for user in users:
+        last_login = "Never"
+        if user['last_login']:
+            last_login = datetime.fromtimestamp(user['last_login']).strftime('%Y-%m-%d %H:%M')
+
+        status = "Enabled" if user['enabled'] else "Disabled"
+
+        table_data.append([
+            user['user_id'],
+            user['username'],
+            user['role'],
+            user['email'] or '-',
+            status,
+            last_login
+        ])
+
+    headers = ['ID', 'Username', 'Role', 'Email', 'Status', 'Last Login']
+    print(tabulate(table_data, headers=headers, tablefmt='grid'))
+    print(f"\nTotal: {len(users)} users")
+
+    return 0
+
+
+def cmd_user_show(args, db):
+    """Show user details"""
+    user = db.get_user(username=args.username)
+
+    if not user:
+        print(f"User not found: {args.username}")
+        return 1
+
+    print(f"\n{'=' * 60}")
+    print(f"USER: {user['username']}")
+    print(f"{'=' * 60}")
+    print(f"ID: {user['user_id']}")
+    print(f"Role: {user['role']}")
+    print(f"Email: {user['email'] or 'Not set'}")
+    print(f"Full Name: {user['full_name'] or 'Not set'}")
+    print(f"Status: {'Enabled' if user['enabled'] else 'Disabled'}")
+
+    if user['created_at']:
+        created = datetime.fromtimestamp(user['created_at']).strftime('%Y-%m-%d %H:%M:%S')
+        print(f"Created: {created}")
+
+    if user['last_login']:
+        last_login = datetime.fromtimestamp(user['last_login']).strftime('%Y-%m-%d %H:%M:%S')
+        print(f"Last Login: {last_login}")
+    else:
+        print("Last Login: Never")
+
+    print(f"{'=' * 60}\n")
+
+    return 0
+
+
+def cmd_user_passwd(args, db):
+    """Change user password"""
+    user = db.get_user(username=args.username)
+
+    if not user:
+        print(f"User not found: {args.username}")
+        return 1
+
+    # Prompt for new password
+    while True:
+        password = getpass.getpass("New password: ")
+        password_confirm = getpass.getpass("Confirm new password: ")
+
+        if password != password_confirm:
+            print("Passwords do not match. Try again.")
+            continue
+
+        if len(password) < 8:
+            print("Password must be at least 8 characters. Try again.")
+            continue
+
+        break
+
+    db.change_password(user['user_id'], password)
+    print(f"✓ Password changed for user: {args.username}")
+
+    return 0
+
+
+def cmd_user_role(args, db):
+    """Change user role"""
+    user = db.get_user(username=args.username)
+
+    if not user:
+        print(f"User not found: {args.username}")
+        return 1
+
+    db.set_user_role(user['user_id'], args.role)
+    print(f"✓ Changed role for {args.username}: {user['role']} → {args.role}")
+
+    return 0
+
+
+def cmd_user_enable(args, db):
+    """Enable user account"""
+    user = db.get_user(username=args.username)
+
+    if not user:
+        print(f"User not found: {args.username}")
+        return 1
+
+    db.enable_user(user['user_id'])
+    print(f"✓ Enabled user: {args.username}")
+
+    return 0
+
+
+def cmd_user_disable(args, db):
+    """Disable user account"""
+    user = db.get_user(username=args.username)
+
+    if not user:
+        print(f"User not found: {args.username}")
+        return 1
+
+    db.disable_user(user['user_id'])
+    print(f"✓ Disabled user: {args.username}")
+
+    return 0
+
+
+def cmd_key_create(args, db):
+    """Create a new API key"""
+    logger = logging.getLogger("fawkes.auth.cli")
+
+    # Create API key
+    api_key = db.create_api_key(
+        key_name=args.name,
+        key_type=args.type,
+        worker_id=args.worker_id,
+        expires_days=args.expires_days
+    )
+
+    print(f"\n{'=' * 70}")
+    print(f"API KEY CREATED: {args.name}")
+    print(f"{'=' * 70}")
+    print(f"Type: {args.type}")
+    if args.worker_id:
+        print(f"Worker ID: {args.worker_id}")
+    if args.expires_days:
+        print(f"Expires: {args.expires_days} days")
+    print()
+    print("API Key (save this securely, it won't be shown again):")
+    print(f"  {api_key}")
+    print(f"{'=' * 70}\n")
+
+    if args.type == "worker":
+        print("Add this to your worker configuration:")
+        print(f"  auth_api_key: {api_key}")
+        print()
+
+    return 0
+
+
+def cmd_key_list(args, db):
+    """List API keys"""
+    keys = db.list_api_keys()
+
+    if not keys:
+        print("No API keys found")
+        return 0
+
+    table_data = []
+    for key in keys:
+        created = datetime.fromtimestamp(key['created_at']).strftime('%Y-%m-%d %H:%M')
+
+        expires = "-"
+        if key['expires_at']:
+            expires = datetime.fromtimestamp(key['expires_at']).strftime('%Y-%m-%d')
+
+        last_used = "Never"
+        if key['last_used_at']:
+            last_used = datetime.fromtimestamp(key['last_used_at']).strftime('%Y-%m-%d %H:%M')
+
+        status = "Active" if key['enabled'] else "Revoked"
+
+        table_data.append([
+            key['key_id'],
+            key['key_name'][:30],
+            key['key_type'],
+            key['worker_id'] or '-',
+            status,
+            created,
+            expires,
+            last_used
+        ])
+
+    headers = ['ID', 'Name', 'Type', 'Worker', 'Status', 'Created', 'Expires', 'Last Used']
+    print(tabulate(table_data, headers=headers, tablefmt='grid'))
+    print(f"\nTotal: {len(keys)} API keys")
+
+    return 0
+
+
+def cmd_key_revoke(args, db):
+    """Revoke an API key"""
+    db.revoke_api_key(args.key_id)
+    print(f"✓ Revoked API key: {args.key_id}")
+
+    return 0
+
+
+def cmd_cert_generate(args, db):
+    """Generate TLS certificates"""
+    cert_file = args.cert or os.path.expanduser("~/.fawkes/certs/fawkes.crt")
+    key_file = args.key or os.path.expanduser("~/.fawkes/certs/fawkes.key")
+
+    # Create directory if it doesn't exist
+    os.makedirs(os.path.dirname(cert_file), exist_ok=True)
+
+    # Check if files already exist
+    if os.path.exists(cert_file) and not args.force:
+        print(f"Certificate already exists: {cert_file}")
+        print("Use --force to overwrite")
+        return 1
+
+    # Generate certificate
+    if generate_self_signed_cert(cert_file, key_file, days_valid=args.days,
+                                 common_name=args.common_name):
+        print(f"✓ Generated TLS certificate: {cert_file}")
+        print(f"✓ Generated TLS private key: {key_file}")
+        print(f"  Valid for: {args.days} days")
+        print(f"  Common Name: {args.common_name}")
+        return 0
+    else:
+        print("Failed to generate certificates")
+        return 1
+
+
+def cmd_cert_verify(args, db):
+    """Verify TLS certificate"""
+    if not os.path.exists(args.cert):
+        print(f"Certificate not found: {args.cert}")
+        return 1
+
+    if verify_certificate(args.cert):
+        print(f"✓ Certificate is valid: {args.cert}")
+        return 0
+    else:
+        print(f"✗ Certificate is invalid or expired: {args.cert}")
+        return 1
+
+
+def cmd_audit(args, db):
+    """View audit log"""
+    user = None
+    if args.user:
+        user_obj = db.get_user(username=args.user)
+        if not user_obj:
+            print(f"User not found: {args.user}")
+            return 1
+        user = user_obj['user_id']
+
+    logs = db.get_audit_log(user_id=user, action=args.action, limit=args.limit)
+
+    if not logs:
+        print("No audit log entries found")
+        return 0
+
+    table_data = []
+    for log in logs:
+        timestamp = datetime.fromtimestamp(log['timestamp']).strftime('%Y-%m-%d %H:%M:%S')
+        user_id = log['user_id'] if log['user_id'] else "system"
+        success = "✓" if log['success'] else "✗"
+
+        table_data.append([
+            timestamp,
+            user_id,
+            log['action'],
+            log['resource'][:40],
+            success,
+            log['ip_address'] or '-'
+        ])
+
+    headers = ['Timestamp', 'User', 'Action', 'Resource', 'Success', 'IP']
+    print(tabulate(table_data, headers=headers, tablefmt='grid'))
+    print(f"\nTotal: {len(logs)} log entries")
+
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Fawkes Authentication Management"
+    )
+
+    parser.add_argument('--db', default='~/.fawkes/auth.db',
+                       help='Authentication database path')
+    parser.add_argument('--log-level', default='INFO',
+                       choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                       help='Logging level')
+
+    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
+
+    # Init command
+    init_parser = subparsers.add_parser('init', help='Initialize authentication system')
+    init_parser.add_argument('--skip-certs', action='store_true',
+                            help='Skip TLS certificate generation')
+
+    # User commands
+    user_parsers = subparsers.add_parser('user', help='User management')
+    user_subparsers = user_parsers.add_subparsers(dest='user_command')
+
+    # user add
+    user_add_parser = user_subparsers.add_parser('add', help='Add new user')
+    user_add_parser.add_argument('username', help='Username')
+    user_add_parser.add_argument('--role', default='viewer',
+                                choices=['admin', 'operator', 'viewer'],
+                                help='User role')
+    user_add_parser.add_argument('--email', help='Email address')
+    user_add_parser.add_argument('--full-name', help='Full name')
+    user_add_parser.add_argument('--password', help='Password (prompt if not provided)')
+
+    # user list
+    user_subparsers.add_parser('list', help='List users')
+
+    # user show
+    user_show_parser = user_subparsers.add_parser('show', help='Show user details')
+    user_show_parser.add_argument('username', help='Username')
+
+    # user passwd
+    user_passwd_parser = user_subparsers.add_parser('passwd', help='Change password')
+    user_passwd_parser.add_argument('username', help='Username')
+
+    # user role
+    user_role_parser = user_subparsers.add_parser('role', help='Change user role')
+    user_role_parser.add_argument('username', help='Username')
+    user_role_parser.add_argument('role', choices=['admin', 'operator', 'viewer'],
+                                 help='New role')
+
+    # user enable
+    user_enable_parser = user_subparsers.add_parser('enable', help='Enable user')
+    user_enable_parser.add_argument('username', help='Username')
+
+    # user disable
+    user_disable_parser = user_subparsers.add_parser('disable', help='Disable user')
+    user_disable_parser.add_argument('username', help='Username')
+
+    # API key commands
+    key_parsers = subparsers.add_parser('key', help='API key management')
+    key_subparsers = key_parsers.add_subparsers(dest='key_command')
+
+    # key create
+    key_create_parser = key_subparsers.add_parser('create', help='Create API key')
+    key_create_parser.add_argument('name', help='Key name')
+    key_create_parser.add_argument('--type', default='worker',
+                                  choices=['worker', 'service', 'user'],
+                                  help='Key type')
+    key_create_parser.add_argument('--worker-id', help='Worker ID for worker keys')
+    key_create_parser.add_argument('--expires-days', type=int,
+                                  help='Expiration in days')
+
+    # key list
+    key_subparsers.add_parser('list', help='List API keys')
+
+    # key revoke
+    key_revoke_parser = key_subparsers.add_parser('revoke', help='Revoke API key')
+    key_revoke_parser.add_argument('key_id', type=int, help='Key ID to revoke')
+
+    # Certificate commands
+    cert_parsers = subparsers.add_parser('cert', help='TLS certificate management')
+    cert_subparsers = cert_parsers.add_subparsers(dest='cert_command')
+
+    # cert generate
+    cert_gen_parser = cert_subparsers.add_parser('generate', help='Generate TLS certificate')
+    cert_gen_parser.add_argument('--cert', help='Certificate file path')
+    cert_gen_parser.add_argument('--key', help='Private key file path')
+    cert_gen_parser.add_argument('--days', type=int, default=365,
+                                help='Days valid (default: 365)')
+    cert_gen_parser.add_argument('--common-name', default='fawkes-controller',
+                                help='Common name for certificate')
+    cert_gen_parser.add_argument('--force', action='store_true',
+                                help='Overwrite existing files')
+
+    # cert verify
+    cert_verify_parser = cert_subparsers.add_parser('verify', help='Verify TLS certificate')
+    cert_verify_parser.add_argument('cert', help='Certificate file to verify')
+
+    # Audit command
+    audit_parser = subparsers.add_parser('audit', help='View audit log')
+    audit_parser.add_argument('--user', help='Filter by username')
+    audit_parser.add_argument('--action', help='Filter by action')
+    audit_parser.add_argument('--limit', type=int, default=50,
+                            help='Maximum entries to show')
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    # Setup logging
+    log_level = getattr(logging, args.log_level.upper())
+    logger = setup_logging(log_level)
+
+    # Expand database path
+    db_path = os.path.expanduser(args.db)
+    db_dir = os.path.dirname(db_path)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+
+    # Open database
+    db = AuthDB(db_path)
+
+    try:
+        if args.command == 'init':
+            exit_code = cmd_init(args, db)
+        elif args.command == 'user':
+            if args.user_command == 'add':
+                exit_code = cmd_user_add(args, db)
+            elif args.user_command == 'list':
+                exit_code = cmd_user_list(args, db)
+            elif args.user_command == 'show':
+                exit_code = cmd_user_show(args, db)
+            elif args.user_command == 'passwd':
+                exit_code = cmd_user_passwd(args, db)
+            elif args.user_command == 'role':
+                exit_code = cmd_user_role(args, db)
+            elif args.user_command == 'enable':
+                exit_code = cmd_user_enable(args, db)
+            elif args.user_command == 'disable':
+                exit_code = cmd_user_disable(args, db)
+            else:
+                user_parsers.print_help()
+                exit_code = 1
+        elif args.command == 'key':
+            if args.key_command == 'create':
+                exit_code = cmd_key_create(args, db)
+            elif args.key_command == 'list':
+                exit_code = cmd_key_list(args, db)
+            elif args.key_command == 'revoke':
+                exit_code = cmd_key_revoke(args, db)
+            else:
+                key_parsers.print_help()
+                exit_code = 1
+        elif args.command == 'cert':
+            if args.cert_command == 'generate':
+                exit_code = cmd_cert_generate(args, db)
+            elif args.cert_command == 'verify':
+                exit_code = cmd_cert_verify(args, db)
+            else:
+                cert_parsers.print_help()
+                exit_code = 1
+        elif args.command == 'audit':
+            exit_code = cmd_audit(args, db)
+        else:
+            exit_code = 1
+
+        sys.exit(exit_code)
+
+    except KeyboardInterrupt:
+        logger.info("\nInterrupted by user")
+        sys.exit(130)
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        sys.exit(1)
+    finally:
+        db.close()
+
+
+if __name__ == '__main__':
+    main()
