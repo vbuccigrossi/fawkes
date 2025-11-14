@@ -1,0 +1,443 @@
+#!/usr/bin/env python3
+"""
+Fawkes Differential Fuzzing CLI
+
+Compare behavior across different software versions/implementations.
+"""
+
+import sys
+import os
+import argparse
+import logging
+import json
+from pathlib import Path
+from tabulate import tabulate
+
+# Add parent directory to path
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir))
+
+from fawkes.differential.harness import DifferentialHarness, DifferentialTarget
+from fawkes.differential.db import DifferentialDB
+
+
+def setup_logging(level=logging.INFO):
+    """Setup logging configuration"""
+    logging.basicConfig(
+        level=level,
+        format='[%(asctime)s] %(levelname)s: %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    return logging.getLogger("fawkes.diff.cli")
+
+
+def cmd_run(args, db):
+    """Run differential fuzzing campaign"""
+    logger = logging.getLogger("fawkes.diff.cli")
+
+    # Load target configuration
+    if not os.path.exists(args.config):
+        print(f"Error: Config file not found: {args.config}")
+        return 1
+
+    with open(args.config, 'r') as f:
+        config = json.load(f)
+
+    targets_config = config.get("targets", [])
+    if len(targets_config) < 2:
+        print("Error: Need at least 2 targets for differential fuzzing")
+        return 1
+
+    # Create targets
+    targets = []
+    for t in targets_config:
+        target = DifferentialTarget(
+            target_id=t["id"],
+            version=t["version"],
+            disk_image=t["disk_image"],
+            snapshot_name=t["snapshot_name"],
+            arch=t.get("arch", "x86_64")
+        )
+        targets.append(target)
+
+    logger.info(f"Loaded {len(targets)} targets from config")
+
+    # Create harness
+    harness = DifferentialHarness(
+        targets=targets,
+        timeout=args.timeout,
+        output_dir=args.output_dir
+    )
+
+    # Create campaign in database
+    campaign_id = db.add_campaign(
+        name=args.campaign_name or f"Campaign_{int(time.time())}",
+        targets=[t.target_id for t in targets],
+        description=config.get("description")
+    )
+
+    logger.info(f"Created campaign {campaign_id}")
+
+    # Run campaign
+    try:
+        stats = harness.run_campaign(
+            testcase_dir=args.testcases,
+            max_testcases=args.max_testcases
+        )
+
+        # Update database
+        db.update_campaign_stats(campaign_id, stats)
+        db.end_campaign(campaign_id)
+
+        # Save divergences to database
+        for divergence in harness.get_divergences():
+            db.add_divergence(campaign_id, divergence)
+
+        # Generate report
+        print("\n" + harness.generate_report())
+
+        # Save report to file
+        report_path = os.path.join(args.output_dir, f"report_campaign_{campaign_id}.txt")
+        with open(report_path, 'w') as f:
+            f.write(harness.generate_report())
+
+        logger.info(f"Report saved to: {report_path}")
+
+        # Show critical divergences
+        critical = harness.get_critical_divergences()
+        if critical:
+            print("\n" + "=" * 80)
+            print(f"⚠️  FOUND {len(critical)} CRITICAL DIVERGENCES!")
+            print("=" * 80)
+            for div in critical[:5]:
+                print(f"\nID: {div.divergence_id}")
+                print(f"Testcase: {div.testcase_path}")
+                print(f"Description: {div.description}")
+
+        return 0
+
+    except KeyboardInterrupt:
+        logger.info("\nCampaign interrupted by user")
+        db.end_campaign(campaign_id)
+        harness.cleanup()
+        return 130
+    except Exception as e:
+        logger.error(f"Campaign failed: {e}", exc_info=True)
+        db.end_campaign(campaign_id)
+        return 1
+
+
+def cmd_list_campaigns(args, db):
+    """List all campaigns"""
+    cursor = db.conn.cursor()
+    cursor.execute('''SELECT campaign_id, name, start_time, end_time,
+                     testcases_executed, divergences_found, crashes_found
+                     FROM campaigns ORDER BY campaign_id DESC LIMIT ?''', (args.limit,))
+
+    rows = cursor.fetchall()
+
+    if not rows:
+        print("No campaigns found")
+        return
+
+    table_data = []
+    for row in rows:
+        campaign_id, name, start_time, end_time, tests, divs, crashes = row
+
+        from datetime import datetime
+        start_str = datetime.fromtimestamp(start_time).strftime('%Y-%m-%d %H:%M') if start_time else '-'
+        end_str = datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M') if end_time else 'Running'
+
+        table_data.append([
+            campaign_id,
+            name[:30],
+            start_str,
+            end_str,
+            tests,
+            divs,
+            crashes
+        ])
+
+    headers = ['ID', 'Name', 'Started', 'Ended', 'Tests', 'Divergences', 'Crashes']
+    print(tabulate(table_data, headers=headers, tablefmt='grid'))
+    print(f"\nTotal: {len(rows)} campaigns")
+
+
+def cmd_show_campaign(args, db):
+    """Show campaign details"""
+    campaign = db.get_campaign_summary(args.campaign_id)
+
+    if not campaign:
+        print(f"Campaign {args.campaign_id} not found")
+        return 1
+
+    from datetime import datetime
+
+    print(f"\n{'=' * 80}")
+    print(f"CAMPAIGN: {campaign['campaign_id']} - {campaign['name']}")
+    print(f"{'=' * 80}")
+
+    if campaign['description']:
+        print(f"Description: {campaign['description']}")
+
+    print(f"Targets: {', '.join(campaign['targets'])}")
+
+    start_time = datetime.fromtimestamp(campaign['start_time']).strftime('%Y-%m-%d %H:%M:%S')
+    print(f"Started: {start_time}")
+
+    if campaign['end_time']:
+        end_time = datetime.fromtimestamp(campaign['end_time']).strftime('%Y-%m-%d %H:%M:%S')
+        duration = campaign['end_time'] - campaign['start_time']
+        print(f"Ended: {end_time} (duration: {duration}s)")
+
+    print(f"\nStatistics:")
+    print(f"  Testcases Executed: {campaign['testcases_executed']}")
+    print(f"  Divergences Found: {campaign['divergences_found']}")
+    print(f"  Crashes Found: {campaign['crashes_found']}")
+
+    # Get divergences
+    divergences = db.get_divergences(campaign_id=args.campaign_id)
+
+    if divergences:
+        print(f"\nDivergences by Severity:")
+        severity_counts = {}
+        for div in divergences:
+            sev = div['severity']
+            severity_counts[sev] = severity_counts.get(sev, 0) + 1
+
+        for sev in ['critical', 'high', 'medium', 'low', 'info']:
+            count = severity_counts.get(sev, 0)
+            if count > 0:
+                print(f"  {sev.upper():12s}: {count}")
+
+    print(f"{'=' * 80}\n")
+
+
+def cmd_list_divergences(args, db):
+    """List divergences"""
+    divergences = db.get_divergences(
+        campaign_id=args.campaign_id,
+        severity=args.severity,
+        div_type=args.type
+    )
+
+    if not divergences:
+        print("No divergences found")
+        return
+
+    # Limit results
+    divergences = divergences[:args.limit]
+
+    table_data = []
+    for div in divergences:
+        from datetime import datetime
+        timestamp = datetime.fromtimestamp(div['timestamp']).strftime('%Y-%m-%d %H:%M')
+
+        table_data.append([
+            div['divergence_id'][:8],
+            div['severity'],
+            div['divergence_type'],
+            f"{div['target_a_id']} vs {div['target_b_id']}",
+            os.path.basename(div['testcase_path'])[:30],
+            f"{div['confidence']*100:.0f}%",
+            '✓' if div['triaged'] else '',
+            timestamp
+        ])
+
+    headers = ['ID', 'Severity', 'Type', 'Targets', 'Testcase', 'Conf', 'Triaged', 'Time']
+    print(tabulate(table_data, headers=headers, tablefmt='grid'))
+    print(f"\nTotal: {len(divergences)} divergences")
+
+
+def cmd_show_divergence(args, db):
+    """Show divergence details"""
+    divergences = db.get_divergences()
+    divergence = None
+
+    for div in divergences:
+        if div['divergence_id'].startswith(args.divergence_id):
+            divergence = div
+            break
+
+    if not divergence:
+        print(f"Divergence {args.divergence_id} not found")
+        return 1
+
+    print(f"\n{'=' * 80}")
+    print(f"DIVERGENCE: {divergence['divergence_id']}")
+    print(f"{'=' * 80}")
+
+    print(f"Type: {divergence['divergence_type']}")
+    print(f"Severity: {divergence['severity'].upper()}")
+    print(f"Confidence: {divergence['confidence']*100:.1f}%")
+    print(f"Testcase: {divergence['testcase_path']}")
+    print(f"\nTargets:")
+    print(f"  A: {divergence['target_a_id']}")
+    print(f"  B: {divergence['target_b_id']}")
+    print(f"\nDescription:")
+    print(f"  {divergence['description']}")
+
+    if divergence['details']:
+        print(f"\nDetails:")
+        for key, value in divergence['details'].items():
+            print(f"  {key}: {value}")
+
+    if divergence['triaged']:
+        print(f"\nTriaged: YES")
+        if divergence['notes']:
+            print(f"Notes: {divergence['notes']}")
+
+    print(f"{'=' * 80}\n")
+
+
+def cmd_triage(args, db):
+    """Triage a divergence"""
+    db.triage_divergence(args.divergence_id, args.notes)
+    print(f"Divergence {args.divergence_id} marked as triaged")
+
+
+def cmd_stats(args, db):
+    """Show statistics"""
+    stats = db.get_stats(campaign_id=args.campaign_id)
+
+    print(f"\n{'=' * 80}")
+    print("DIFFERENTIAL FUZZING STATISTICS")
+    print(f"{'=' * 80}\n")
+
+    if args.campaign_id:
+        print(f"Campaign: {args.campaign_id}\n")
+
+    print(f"Total Campaigns: {stats['total_campaigns']}")
+    print(f"Total Divergences: {stats['total_divergences']}")
+    print(f"Triaged: {stats['triaged_divergences']}")
+
+    if stats.get('divergences_by_severity'):
+        print(f"\nDivergences by Severity:")
+        for sev, count in sorted(stats['divergences_by_severity'].items()):
+            print(f"  {sev.upper():12s}: {count}")
+
+    if stats.get('divergences_by_type'):
+        print(f"\nDivergences by Type:")
+        for div_type, count in sorted(stats['divergences_by_type'].items()):
+            print(f"  {div_type:20s}: {count}")
+
+    print(f"\n{'=' * 80}\n")
+
+
+def main():
+    import time
+
+    parser = argparse.ArgumentParser(
+        description="Fawkes Differential Fuzzing - Compare behavior across versions"
+    )
+
+    parser.add_argument('--db', default='~/.fawkes/differential.db',
+                       help='Database path (default: ~/.fawkes/differential.db)')
+    parser.add_argument('--log-level', default='INFO',
+                       choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                       help='Logging level')
+
+    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
+
+    # Run command
+    run_parser = subparsers.add_parser('run', help='Run differential fuzzing campaign')
+    run_parser.add_argument('config', help='Configuration file (JSON)')
+    run_parser.add_argument('testcases', help='Directory containing testcases')
+    run_parser.add_argument('--campaign-name', help='Campaign name')
+    run_parser.add_argument('--timeout', type=int, default=60,
+                           help='Execution timeout per target (seconds)')
+    run_parser.add_argument('--max-testcases', type=int,
+                           help='Maximum testcases to run')
+    run_parser.add_argument('--output-dir', default='~/.fawkes/differential',
+                           help='Output directory')
+
+    # List campaigns
+    list_parser = subparsers.add_parser('campaigns', help='List campaigns')
+    list_parser.add_argument('--limit', type=int, default=20,
+                            help='Maximum campaigns to show')
+
+    # Show campaign
+    show_parser = subparsers.add_parser('show', help='Show campaign details')
+    show_parser.add_argument('campaign_id', type=int, help='Campaign ID')
+
+    # List divergences
+    divs_parser = subparsers.add_parser('divergences', help='List divergences')
+    divs_parser.add_argument('--campaign-id', type=int,
+                            help='Filter by campaign')
+    divs_parser.add_argument('--severity',
+                            choices=['critical', 'high', 'medium', 'low', 'info'],
+                            help='Filter by severity')
+    divs_parser.add_argument('--type', help='Filter by type')
+    divs_parser.add_argument('--limit', type=int, default=50,
+                            help='Maximum divergences to show')
+
+    # Show divergence
+    show_div_parser = subparsers.add_parser('show-divergence',
+                                           help='Show divergence details')
+    show_div_parser.add_argument('divergence_id', help='Divergence ID')
+
+    # Triage
+    triage_parser = subparsers.add_parser('triage', help='Triage a divergence')
+    triage_parser.add_argument('divergence_id', help='Divergence ID')
+    triage_parser.add_argument('notes', help='Triage notes')
+
+    # Stats
+    stats_parser = subparsers.add_parser('stats', help='Show statistics')
+    stats_parser.add_argument('--campaign-id', type=int,
+                             help='Show stats for specific campaign')
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    # Setup logging
+    log_level = getattr(logging, args.log_level.upper())
+    logger = setup_logging(log_level)
+
+    # Expand database path
+    db_path = os.path.expanduser(args.db)
+    db_dir = os.path.dirname(db_path)
+    if db_dir:
+        os.makedirs(db_dir, exist_ok=True)
+
+    # Open database
+    db = DifferentialDB(db_path)
+
+    try:
+        if args.command == 'run':
+            exit_code = cmd_run(args, db)
+        elif args.command == 'campaigns':
+            cmd_list_campaigns(args, db)
+            exit_code = 0
+        elif args.command == 'show':
+            exit_code = cmd_show_campaign(args, db)
+        elif args.command == 'divergences':
+            cmd_list_divergences(args, db)
+            exit_code = 0
+        elif args.command == 'show-divergence':
+            exit_code = cmd_show_divergence(args, db)
+        elif args.command == 'triage':
+            cmd_triage(args, db)
+            exit_code = 0
+        elif args.command == 'stats':
+            cmd_stats(args, db)
+            exit_code = 0
+        else:
+            exit_code = 1
+
+        sys.exit(exit_code)
+
+    except KeyboardInterrupt:
+        logger.info("\nInterrupted by user")
+        sys.exit(130)
+    except Exception as e:
+        logger.error(f"Error: {e}", exc_info=True)
+        sys.exit(1)
+    finally:
+        db.close()
+
+
+if __name__ == '__main__':
+    main()
