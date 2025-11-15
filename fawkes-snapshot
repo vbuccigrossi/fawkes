@@ -1,0 +1,756 @@
+#!/usr/bin/env python3
+"""
+Fawkes Snapshot Management Tool
+
+Provides comprehensive VM snapshot management including:
+- List snapshots in QCOW2 disk images
+- Create snapshots with validation
+- Delete snapshots
+- Validate snapshot readiness for fuzzing
+
+Usage:
+    fawkes-snapshot list --disk image.qcow2
+    fawkes-snapshot create --disk image.qcow2 --name fuzzing-ready
+    fawkes-snapshot delete --disk image.qcow2 --name old-snapshot
+    fawkes-snapshot validate --disk image.qcow2 --name fuzzing-ready
+"""
+
+import argparse
+import os
+import sys
+import subprocess
+import json
+import time
+import socket
+import logging
+from pathlib import Path
+from typing import List, Dict, Optional
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+class SnapshotManager:
+    """Manages QEMU/QCOW2 VM snapshots for Fawkes fuzzing."""
+
+    def __init__(self, disk_path: str):
+        """Initialize snapshot manager with disk image path."""
+        self.disk_path = os.path.expanduser(disk_path)
+        if not os.path.exists(self.disk_path):
+            raise FileNotFoundError(f"Disk image not found: {self.disk_path}")
+
+        # Verify it's a QCOW2 image
+        if not self._is_qcow2():
+            raise ValueError(f"Not a QCOW2 image: {self.disk_path}")
+
+    def _is_qcow2(self) -> bool:
+        """Check if the disk image is QCOW2 format."""
+        try:
+            result = subprocess.run(
+                ["qemu-img", "info", "--output=json", self.disk_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            info = json.loads(result.stdout)
+            return info.get("format") == "qcow2"
+        except (subprocess.CalledProcessError, json.JSONDecodeError, FileNotFoundError):
+            return False
+
+    def list_snapshots(self) -> List[Dict[str, str]]:
+        """
+        List all snapshots in the disk image.
+
+        Returns:
+            List of snapshot dictionaries with keys: id, tag, vm_size, date, vm_clock
+        """
+        try:
+            result = subprocess.run(
+                ["qemu-img", "snapshot", "-l", self.disk_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            snapshots = []
+            lines = result.stdout.strip().split('\n')
+
+            # Skip header lines
+            for line in lines[2:]:  # First two lines are headers
+                if not line.strip():
+                    continue
+
+                # Parse snapshot line
+                # Format: ID        TAG                     VM SIZE                DATE       VM CLOCK
+                parts = line.split()
+                if len(parts) >= 5:
+                    snapshot = {
+                        'id': parts[0],
+                        'tag': parts[1],
+                        'vm_size': parts[2],
+                        'date': f"{parts[3]} {parts[4]}",
+                        'vm_clock': parts[5] if len(parts) > 5 else "N/A"
+                    }
+                    snapshots.append(snapshot)
+
+            return snapshots
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to list snapshots: {e.stderr}")
+            return []
+        except FileNotFoundError:
+            logger.error("qemu-img not found. Please install QEMU tools.")
+            return []
+
+    def create_snapshot(self, name: str, boot_vm: bool = True,
+                       validate: bool = True, timeout: int = 60) -> bool:
+        """
+        Create a new VM snapshot.
+
+        Args:
+            name: Snapshot name/tag
+            boot_vm: Boot VM before creating snapshot
+            validate: Validate snapshot after creation
+            timeout: Timeout for VM boot in seconds
+
+        Returns:
+            True if snapshot created successfully
+        """
+        logger.info(f"Creating snapshot '{name}' for {self.disk_path}")
+
+        if boot_vm:
+            logger.info("Booting VM to create live snapshot...")
+            if not self._create_live_snapshot(name, timeout):
+                return False
+        else:
+            logger.info("Creating snapshot without booting VM...")
+            if not self._create_snapshot_direct(name):
+                return False
+
+        logger.info(f"✓ Snapshot '{name}' created successfully")
+
+        if validate:
+            logger.info(f"Validating snapshot '{name}'...")
+            if self.validate_snapshot(name):
+                logger.info(f"✓ Snapshot '{name}' is valid and ready for fuzzing")
+                return True
+            else:
+                logger.warning(f"⚠ Snapshot '{name}' created but validation failed")
+                return False
+
+        return True
+
+    def _create_live_snapshot(self, name: str, timeout: int) -> bool:
+        """Create snapshot by booting VM and using QEMU monitor."""
+        # Find available QEMU binary
+        qemu_binary = self._find_qemu_binary()
+        if not qemu_binary:
+            logger.error("No QEMU binary found")
+            return False
+
+        # Pick a free port for QEMU monitor
+        monitor_port = self._pick_free_port()
+
+        # Start QEMU with monitor
+        cmd = [
+            qemu_binary,
+            "-drive", f"file={self.disk_path},format=qcow2",
+            "-m", "256M",
+            "-nographic",
+            "-monitor", f"tcp:127.0.0.1:{monitor_port},server,nowait"
+        ]
+
+        logger.debug(f"Starting QEMU with command: {' '.join(cmd)}")
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL
+            )
+
+            # Wait for VM to boot
+            logger.info(f"Waiting for VM to boot (timeout: {timeout}s)...")
+            time.sleep(5)  # Give VM some time to start
+
+            # Check if VM is still running
+            if proc.poll() is not None:
+                stderr = proc.stderr.read().decode()
+                logger.error(f"VM failed to start: {stderr}")
+                return False
+
+            # Connect to QEMU monitor and create snapshot
+            logger.info(f"Creating snapshot via QEMU monitor on port {monitor_port}...")
+            if not self._send_monitor_command(monitor_port, f"savevm {name}", timeout=10):
+                logger.error("Failed to create snapshot via monitor")
+                proc.terminate()
+                proc.wait(timeout=5)
+                return False
+
+            # Shut down VM gracefully
+            logger.info("Shutting down VM...")
+            self._send_monitor_command(monitor_port, "quit", timeout=5)
+
+            # Wait for process to exit
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                logger.warning("VM did not shut down gracefully, forcing...")
+                proc.kill()
+                proc.wait()
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to create live snapshot: {e}")
+            if 'proc' in locals():
+                try:
+                    proc.kill()
+                    proc.wait()
+                except:
+                    pass
+            return False
+
+    def _create_snapshot_direct(self, name: str) -> bool:
+        """Create snapshot directly using qemu-img (disk-only, not recommended)."""
+        try:
+            result = subprocess.run(
+                ["qemu-img", "snapshot", "-c", name, self.disk_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to create snapshot: {e.stderr}")
+            return False
+
+    def delete_snapshot(self, name: str) -> bool:
+        """
+        Delete a snapshot from the disk image.
+
+        Args:
+            name: Snapshot name/tag to delete
+
+        Returns:
+            True if snapshot deleted successfully
+        """
+        logger.info(f"Deleting snapshot '{name}' from {self.disk_path}")
+
+        try:
+            # First check if snapshot exists
+            snapshots = self.list_snapshots()
+            if not any(s['tag'] == name for s in snapshots):
+                logger.error(f"Snapshot '{name}' not found")
+                return False
+
+            # Delete snapshot
+            result = subprocess.run(
+                ["qemu-img", "snapshot", "-d", name, self.disk_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            logger.info(f"✓ Snapshot '{name}' deleted successfully")
+            return True
+
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to delete snapshot: {e.stderr}")
+            return False
+
+    def validate_snapshot(self, name: str, agent_check: bool = True,
+                         agent_timeout: int = 30) -> bool:
+        """
+        Validate that a snapshot is ready for fuzzing.
+
+        Checks:
+        - Snapshot exists
+        - Snapshot has full VM state (not disk-only)
+        - (Optional) Fawkes agent is running and responsive
+
+        Args:
+            name: Snapshot name/tag to validate
+            agent_check: Check if Fawkes agent is running
+            agent_timeout: Timeout for agent check in seconds
+
+        Returns:
+            True if snapshot is valid and ready for fuzzing
+        """
+        logger.info(f"Validating snapshot '{name}' in {self.disk_path}")
+
+        # Check if snapshot exists
+        snapshots = self.list_snapshots()
+        snapshot = None
+        for s in snapshots:
+            if s['tag'] == name:
+                snapshot = s
+                break
+
+        if not snapshot:
+            logger.error(f"✗ Snapshot '{name}' not found")
+            return False
+
+        logger.info(f"✓ Snapshot '{name}' exists (VM Size: {snapshot['vm_size']})")
+
+        # Check if snapshot has VM state
+        # Disk-only snapshots have VM size of "0 B"
+        if snapshot['vm_size'] == "0" or snapshot['vm_size'] == "0B":
+            logger.error(f"✗ Snapshot '{name}' is disk-only (no VM state)")
+            logger.error("   This snapshot cannot be loaded with -loadvm")
+            logger.error("   Create a proper snapshot by booting the VM and using 'savevm'")
+            return False
+
+        logger.info(f"✓ Snapshot has VM state ({snapshot['vm_size']})")
+
+        # Test loading the snapshot
+        logger.info(f"Testing snapshot load...")
+        if not self._test_snapshot_load(name):
+            logger.error(f"✗ Failed to load snapshot '{name}'")
+            return False
+
+        logger.info(f"✓ Snapshot loads successfully")
+
+        # Optional: Check Fawkes agent
+        if agent_check:
+            logger.info(f"Checking Fawkes agent (timeout: {agent_timeout}s)...")
+            if self._check_agent(name, agent_timeout):
+                logger.info(f"✓ Fawkes agent is running and responsive")
+            else:
+                logger.warning(f"⚠ Fawkes agent is not responding")
+                logger.warning("   The VM may not have the agent installed or configured")
+                logger.warning("   Fuzzing may not work correctly with this snapshot")
+                return False
+
+        logger.info(f"✓ Snapshot '{name}' is valid and ready for fuzzing")
+        return True
+
+    def _test_snapshot_load(self, name: str, timeout: int = 10) -> bool:
+        """Test if a snapshot can be loaded successfully."""
+        qemu_binary = self._find_qemu_binary()
+        if not qemu_binary:
+            logger.error("No QEMU binary found")
+            return False
+
+        cmd = [
+            qemu_binary,
+            "-drive", f"file={self.disk_path},format=qcow2,snapshot=on",
+            "-loadvm", name,
+            "-m", "256M",
+            "-nographic",
+            "-serial", "none",
+            "-monitor", "none"
+        ]
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.DEVNULL
+            )
+
+            # Wait briefly for load
+            time.sleep(2)
+
+            # Check if process is still running (means load succeeded)
+            if proc.poll() is None:
+                # Success - kill the VM
+                proc.terminate()
+                proc.wait(timeout=5)
+                return True
+            else:
+                # Process exited - check stderr for error
+                stderr = proc.stderr.read().decode()
+                if "disk-only snapshot" in stderr:
+                    logger.error("Snapshot is disk-only")
+                elif stderr:
+                    logger.debug(f"QEMU stderr: {stderr}")
+                return False
+
+        except Exception as e:
+            logger.debug(f"Snapshot load test error: {e}")
+            return False
+        finally:
+            if 'proc' in locals():
+                try:
+                    proc.kill()
+                    proc.wait()
+                except:
+                    pass
+
+    def _check_agent(self, name: str, timeout: int) -> bool:
+        """Check if Fawkes agent is running in the snapshot."""
+        qemu_binary = self._find_qemu_binary()
+        if not qemu_binary:
+            return False
+
+        # Pick a free port for agent connection
+        agent_port = self._pick_free_port()
+
+        cmd = [
+            qemu_binary,
+            "-drive", f"file={self.disk_path},format=qcow2,snapshot=on",
+            "-loadvm", name,
+            "-m", "256M",
+            "-nographic",
+            "-net", f"user,hostfwd=tcp::{agent_port}-:9999",
+            "-net", "nic"
+        ]
+
+        proc = None
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL
+            )
+
+            # Wait for VM to boot and agent to start
+            logger.debug(f"Waiting for agent on port {agent_port}...")
+
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                try:
+                    # Try to connect to agent
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(1)
+                    sock.connect(('127.0.0.1', agent_port))
+
+                    # Send ping message
+                    ping_msg = json.dumps({"type": "ping"}) + "\n"
+                    sock.sendall(ping_msg.encode())
+
+                    # Wait for response
+                    sock.settimeout(5)
+                    response = sock.recv(1024).decode()
+                    sock.close()
+
+                    if response and "pong" in response.lower():
+                        logger.debug("Agent responded to ping")
+                        return True
+
+                except (socket.error, socket.timeout):
+                    pass
+
+                time.sleep(1)
+
+            logger.debug("Agent did not respond within timeout")
+            return False
+
+        except Exception as e:
+            logger.debug(f"Agent check error: {e}")
+            return False
+        finally:
+            if proc:
+                try:
+                    proc.terminate()
+                    proc.wait(timeout=5)
+                except:
+                    try:
+                        proc.kill()
+                        proc.wait()
+                    except:
+                        pass
+
+    def _find_qemu_binary(self) -> Optional[str]:
+        """Find appropriate QEMU binary for the system."""
+        # Try common QEMU binaries
+        candidates = [
+            "qemu-system-x86_64",
+            "qemu-system-i386",
+            "qemu-system-arm",
+            "qemu-system-aarch64"
+        ]
+
+        for binary in candidates:
+            try:
+                result = subprocess.run(
+                    ["which", binary],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    return binary
+            except:
+                continue
+
+        return None
+
+    def _pick_free_port(self) -> int:
+        """Pick a free TCP port."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(('', 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        return port
+
+    def _send_monitor_command(self, port: int, command: str, timeout: int = 5) -> bool:
+        """Send a command to QEMU monitor via TCP."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            sock.connect(('127.0.0.1', port))
+
+            # Read QEMU banner
+            sock.recv(4096)
+
+            # Send command
+            sock.sendall(f"{command}\n".encode())
+
+            # Read response
+            response = sock.recv(4096).decode()
+            sock.close()
+
+            logger.debug(f"Monitor response: {response}")
+            return True
+
+        except Exception as e:
+            logger.debug(f"Monitor command failed: {e}")
+            return False
+
+
+def cmd_list(args):
+    """List all snapshots in a disk image."""
+    try:
+        manager = SnapshotManager(args.disk)
+        snapshots = manager.list_snapshots()
+
+        if not snapshots:
+            print(f"No snapshots found in {args.disk}")
+            return 0
+
+        print(f"\nSnapshots in {args.disk}:")
+        print(f"{'ID':<5} {'Name':<20} {'VM Size':<12} {'Date':<20} {'VM Clock':<12}")
+        print("-" * 80)
+
+        for snap in snapshots:
+            print(f"{snap['id']:<5} {snap['tag']:<20} {snap['vm_size']:<12} "
+                  f"{snap['date']:<20} {snap['vm_clock']:<12}")
+
+        print(f"\nTotal: {len(snapshots)} snapshot(s)")
+        return 0
+
+    except Exception as e:
+        logger.error(f"Failed to list snapshots: {e}")
+        return 1
+
+
+def cmd_create(args):
+    """Create a new snapshot."""
+    try:
+        manager = SnapshotManager(args.disk)
+
+        # Check if snapshot already exists
+        snapshots = manager.list_snapshots()
+        if any(s['tag'] == args.name for s in snapshots):
+            if not args.force:
+                logger.error(f"Snapshot '{args.name}' already exists. Use --force to overwrite.")
+                return 1
+            else:
+                logger.info(f"Deleting existing snapshot '{args.name}'")
+                manager.delete_snapshot(args.name)
+
+        # Create snapshot
+        success = manager.create_snapshot(
+            args.name,
+            boot_vm=not args.no_boot,
+            validate=not args.no_validate,
+            timeout=args.timeout
+        )
+
+        return 0 if success else 1
+
+    except Exception as e:
+        logger.error(f"Failed to create snapshot: {e}")
+        return 1
+
+
+def cmd_delete(args):
+    """Delete a snapshot."""
+    try:
+        manager = SnapshotManager(args.disk)
+
+        # Confirm deletion unless --force
+        if not args.force:
+            response = input(f"Delete snapshot '{args.name}' from {args.disk}? [y/N]: ")
+            if response.lower() not in ['y', 'yes']:
+                print("Cancelled.")
+                return 0
+
+        success = manager.delete_snapshot(args.name)
+        return 0 if success else 1
+
+    except Exception as e:
+        logger.error(f"Failed to delete snapshot: {e}")
+        return 1
+
+
+def cmd_validate(args):
+    """Validate a snapshot."""
+    try:
+        manager = SnapshotManager(args.disk)
+
+        success = manager.validate_snapshot(
+            args.name,
+            agent_check=not args.no_agent_check,
+            agent_timeout=args.timeout
+        )
+
+        return 0 if success else 1
+
+    except Exception as e:
+        logger.error(f"Failed to validate snapshot: {e}")
+        return 1
+
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="Fawkes VM Snapshot Management Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # List all snapshots
+  fawkes-snapshot list --disk image.qcow2
+
+  # Create a new snapshot with validation
+  fawkes-snapshot create --disk image.qcow2 --name fuzzing-ready
+
+  # Create snapshot without booting VM (not recommended)
+  fawkes-snapshot create --disk image.qcow2 --name backup --no-boot
+
+  # Delete a snapshot
+  fawkes-snapshot delete --disk image.qcow2 --name old-snapshot
+
+  # Validate a snapshot
+  fawkes-snapshot validate --disk image.qcow2 --name fuzzing-ready
+
+  # Validate without agent check
+  fawkes-snapshot validate --disk image.qcow2 --name test --no-agent-check
+        """
+    )
+
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Enable verbose output'
+    )
+
+    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
+    subparsers.required = True
+
+    # List command
+    list_parser = subparsers.add_parser('list', help='List snapshots in a disk image')
+    list_parser.add_argument(
+        '--disk',
+        required=True,
+        help='Path to QCOW2 disk image'
+    )
+    list_parser.set_defaults(func=cmd_list)
+
+    # Create command
+    create_parser = subparsers.add_parser('create', help='Create a new snapshot')
+    create_parser.add_argument(
+        '--disk',
+        required=True,
+        help='Path to QCOW2 disk image'
+    )
+    create_parser.add_argument(
+        '--name',
+        required=True,
+        help='Snapshot name/tag'
+    )
+    create_parser.add_argument(
+        '--no-boot',
+        action='store_true',
+        help='Create disk-only snapshot without booting VM (not recommended)'
+    )
+    create_parser.add_argument(
+        '--no-validate',
+        action='store_true',
+        help='Skip snapshot validation after creation'
+    )
+    create_parser.add_argument(
+        '--timeout',
+        type=int,
+        default=60,
+        help='Timeout for VM operations in seconds (default: 60)'
+    )
+    create_parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Overwrite existing snapshot with same name'
+    )
+    create_parser.set_defaults(func=cmd_create)
+
+    # Delete command
+    delete_parser = subparsers.add_parser('delete', help='Delete a snapshot')
+    delete_parser.add_argument(
+        '--disk',
+        required=True,
+        help='Path to QCOW2 disk image'
+    )
+    delete_parser.add_argument(
+        '--name',
+        required=True,
+        help='Snapshot name/tag to delete'
+    )
+    delete_parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Delete without confirmation'
+    )
+    delete_parser.set_defaults(func=cmd_delete)
+
+    # Validate command
+    validate_parser = subparsers.add_parser('validate', help='Validate a snapshot')
+    validate_parser.add_argument(
+        '--disk',
+        required=True,
+        help='Path to QCOW2 disk image'
+    )
+    validate_parser.add_argument(
+        '--name',
+        required=True,
+        help='Snapshot name/tag to validate'
+    )
+    validate_parser.add_argument(
+        '--no-agent-check',
+        action='store_true',
+        help='Skip Fawkes agent check'
+    )
+    validate_parser.add_argument(
+        '--timeout',
+        type=int,
+        default=30,
+        help='Timeout for agent check in seconds (default: 30)'
+    )
+    validate_parser.set_defaults(func=cmd_validate)
+
+    # Parse arguments
+    args = parser.parse_args()
+
+    # Set logging level
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+
+    # Execute command
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+        return 130
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}", exc_info=args.verbose)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
