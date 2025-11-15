@@ -12,6 +12,7 @@ from fawkes.config import FawkesConfig, VMRegistry
 from fawkes.db.db import FawkesDB
 from fawkes.fuzzers import load_fuzzer
 from fawkes.analysis import load_analyzer
+from fawkes.performance import perf_tracker
 
 class FileFuzzHarness:
     def __init__(self, qemu_mgr: QemuManager, gdb_mgr, db, input_dir: str, disk_path: str,
@@ -68,32 +69,45 @@ class FileFuzzHarness:
     def run_single_testcase(self, job_id: int):
         self.logger.debug("Starting testcase execution")
         if not self.vm_id:
-            self.setup_vm()
+            with perf_tracker.measure("vm_setup"):
+                self.setup_vm()
         try:
-            self.qemu_mgr.revert_to_snapshot(self.vm_id, self.snapshot_name)
-            testcase_path = self.fuzzer.generate_testcase()
-            
+            # Revert to snapshot with performance tracking
+            with perf_tracker.measure("snapshot_revert"):
+                self.qemu_mgr.revert_to_snapshot(self.vm_id, self.snapshot_name)
+
+            # Generate testcase
+            with perf_tracker.measure("testcase_generation"):
+                testcase_path = self.fuzzer.generate_testcase()
+
             # Measure execution time
             start_time = time.time()
-            self.inject_testcase(testcase_path, self.vm_id, job_id)
-            self.gdb_mgr.start_fuzz_worker(self.vm_id, fuzz_loop=False)
-            worker_thread = self.gdb_mgr.workers.get(self.vm_id)
-            if worker_thread:
-                worker_thread.join()
-                gdb_worker = self.gdb_mgr.get_worker(self.vm_id)
-                if gdb_worker and gdb_worker.crash_detected:
-                    self._handle_crash(gdb_worker.crash_info, testcase_path, job_id)
+            with perf_tracker.measure("testcase_injection"):
+                self.inject_testcase(testcase_path, self.vm_id, job_id)
+
+            with perf_tracker.measure("testcase_execution"):
+                self.gdb_mgr.start_fuzz_worker(self.vm_id, fuzz_loop=False)
+                worker_thread = self.gdb_mgr.workers.get(self.vm_id)
+                if worker_thread:
+                    worker_thread.join()
+                    gdb_worker = self.gdb_mgr.get_worker(self.vm_id)
+                    if gdb_worker and gdb_worker.crash_detected:
+                        perf_tracker.increment("crash_detected")
+                        with perf_tracker.measure("crash_handling"):
+                            self._handle_crash(gdb_worker.crash_info, testcase_path, job_id)
+
             exec_time = (time.time() - start_time) * 1000  # ms
-            
+            perf_tracker.increment("testcase_execution_count")
+
             # Log testcase with execution time
             self.db.add_testcase(job_id, self.vm_id, testcase_path, exec_time)
-            
+
             # Update fuzzer stats (total_testcases set in fuzzer init, update generated here)
             gen_tests = self.db._conn.execute(
                 "SELECT COUNT(*) FROM testcases WHERE job_id = ?", (job_id,)
             ).fetchone()[0]
             self.db.update_fuzzer_stats(job_id, generated_testcases=gen_tests)
-            
+
             if not self.fuzzer.next():
                 self.logger.info("Fuzzer exhausted testcases")
                 return False

@@ -6,6 +6,7 @@ from fawkes.qemu import QemuManager
 from fawkes.gdb import GdbFuzzManager
 from fawkes.db.db import FawkesDB
 from fawkes.harness import FileFuzzHarness
+from fawkes.performance import perf_tracker
 
 def run_local_mode(cfg, registry, parallel: int = 1, loop: bool = False, seed_dir: str = None):
     system_resources = SystemResources()
@@ -73,6 +74,10 @@ def run_local_mode(cfg, registry, parallel: int = 1, loop: bool = False, seed_di
             if not loop:
                 break
         logger.info("Local fuzzing complete")
+
+        # Print performance statistics
+        perf_tracker.print_stats()
+
     except Exception as e:
         logger.error(f"Error running local mode: {e}", exc_info=True)
     finally:

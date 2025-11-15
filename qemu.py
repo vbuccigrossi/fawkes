@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from fawkes.config import FawkesConfig, VMRegistry
 from fawkes.arch.architectures import SupportedArchitectures
+from fawkes.performance import perf_tracker
 
 def pick_free_port():
     import socket
@@ -229,27 +230,120 @@ class QemuManager:
             self.logger.error(f"[FAWKES] Failed to create snapshot '{snap_name}': {ret.stderr}")
             return False
 
-    def revert_to_snapshot(self, vm_id: int, snapshot_name: str):
-        """Revert a VM to a snapshot by restarting it cleanly."""
+    def revert_to_snapshot(self, vm_id: int, snapshot_name: str, fast: bool = True):
+        """
+        Revert a VM to a snapshot.
+
+        Args:
+            vm_id: VM identifier
+            snapshot_name: Name of snapshot to revert to
+            fast: If True, use QEMU monitor loadvm (fast). If False, restart VM (slow).
+
+        Performance:
+            - Fast mode (monitor loadvm): ~100-200ms
+            - Slow mode (VM restart): ~2-5 seconds
+        """
         with self.registry._lock:
             vm_info = self.registry.get_vm(vm_id)
             if not vm_info:
-                self.logger.error(f"VM: {vm_id} could not be found so it will not be started/restarted")
+                self.logger.error(f"VM {vm_id} not found")
+                return
+
+            monitor_port = vm_info.get("monitor_port")
+
+        # Fast path: Use QEMU monitor to revert snapshot without restarting VM
+        if fast and monitor_port:
+            with perf_tracker.measure("snapshot_revert_fast"):
+                if self._monitor_loadvm(vm_id, monitor_port, snapshot_name):
+                    self.logger.debug(f"Fast snapshot revert successful for VM {vm_id}")
+                    perf_tracker.increment("snapshot_revert_fast_success")
+                    return
+                else:
+                    self.logger.warning(f"Fast snapshot revert failed for VM {vm_id}, falling back to slow path")
+                    perf_tracker.increment("snapshot_revert_fast_failure")
+
+        # Slow path: Stop and restart VM with snapshot (fallback or explicit)
+        with perf_tracker.measure("snapshot_revert_slow"):
+            self._slow_revert_to_snapshot(vm_id, snapshot_name)
+            perf_tracker.increment("snapshot_revert_slow_count")
+
+    def _monitor_loadvm(self, vm_id: int, monitor_port: int, snapshot_name: str) -> bool:
+        """
+        Use QEMU monitor to load a snapshot without restarting the VM.
+        This is much faster than stopping and restarting.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Connect to QEMU monitor
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            sock.connect(('127.0.0.1', monitor_port))
+
+            # Read QEMU monitor banner
+            banner = sock.recv(4096).decode('utf-8', errors='ignore')
+            self.logger.debug(f"QEMU monitor banner: {banner[:100]}")
+
+            # Send stop command to pause VM
+            sock.sendall(b"stop\n")
+            time.sleep(0.1)
+            response = sock.recv(4096).decode('utf-8', errors='ignore')
+            self.logger.debug(f"Stop response: {response}")
+
+            # Send loadvm command to revert snapshot
+            loadvm_cmd = f"loadvm {snapshot_name}\n"
+            sock.sendall(loadvm_cmd.encode())
+            time.sleep(0.2)  # Give time for snapshot load
+            response = sock.recv(4096).decode('utf-8', errors='ignore')
+            self.logger.debug(f"Loadvm response: {response}")
+
+            # Check for errors
+            if "error" in response.lower() or "unknown" in response.lower():
+                self.logger.error(f"Loadvm failed: {response}")
+                sock.close()
+                return False
+
+            # Send cont command to resume VM
+            sock.sendall(b"cont\n")
+            time.sleep(0.1)
+            response = sock.recv(4096).decode('utf-8', errors='ignore')
+            self.logger.debug(f"Cont response: {response}")
+
+            sock.close()
+            return True
+
+        except socket.timeout:
+            self.logger.error(f"Timeout connecting to QEMU monitor on port {monitor_port}")
+            return False
+        except socket.error as e:
+            self.logger.error(f"Socket error communicating with QEMU monitor: {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Unexpected error during monitor loadvm: {e}", exc_info=True)
+            return False
+
+    def _slow_revert_to_snapshot(self, vm_id: int, snapshot_name: str):
+        """Slow path: Revert VM to snapshot by stopping and restarting (legacy behavior)."""
+        with self.registry._lock:
+            vm_info = self.registry.get_vm(vm_id)
+            if not vm_info:
+                self.logger.error(f"VM {vm_id} not found")
                 return
 
             if vm_info["status"] != "Running":
-                self.logger.error(f"VM {vm_id} is not running starting it now")
-           
+                self.logger.error(f"VM {vm_id} is not running")
+
             pid = vm_info["pid"]
             disk_path = vm_info["disk_path"]
             debug_port = vm_info["debug_port"]
-            monitor_port = vm_info.get("monitor_port")  # Get existing monitor port
+            monitor_port = vm_info.get("monitor_port")
             agent_port = vm_info["agent_port"]
             share_dir = vm_info["share_dir"]
             arch = vm_info["arch"]
-   
-        # Stop the VM if we see it is still running
-        if  vm_info["status"] == "Running":
+
+        # Stop the VM if running
+        if vm_info["status"] == "Running":
             self.stop_vm(vm_id, force=False)
 
         # Restart with snapshot
@@ -263,20 +357,16 @@ class QemuManager:
             "-loadvm", snapshot_name,
         ]
 
-        if self.config.get("use_smb", False):  # SMB for Windows
+        if self.config.get("use_smb", False):
             cmd += ["-net", f"user,smb={share_dir},hostfwd=tcp::{agent_port}-:9999", "-net", "nic"]
-            self.logger.debug(f"Using SMB share at {share_dir} with agent port {agent_port}")
-        elif self.config.get("use_vfs", False):  # VirtFS for Linux/Unix
+        elif self.config.get("use_vfs", False):
             cmd += ["-virtfs", f"local,path={share_dir},mount_tag=hostshare,security_model=none"]
-            self.logger.debug(f"Using VirtFS share at {share_dir}")
-        else:  # Default to SMB
+        else:
             cmd += ["-net", f"user,smb={share_dir},hostfwd=tcp::{agent_port}-:9999", "-net", "nic"]
-            self.logger.debug(f"No share method specified, defaulting to SMB at {share_dir} with agent port {agent_port}")
-        
+
         if not self.config.get("no_headless", False):
             cmd += ["-nographic"]
 
-        # Allocate new monitor port if not exists, or reuse existing
         if not monitor_port:
             monitor_port = pick_free_port()
 
@@ -288,7 +378,7 @@ class QemuManager:
         if vm_params:
             cmd.extend(vm_params.split())
 
-        self.logger.debug(f"Restarting VM {vm_id} with snapshot {snapshot_name}: {' '.join(cmd)}")
+        self.logger.debug(f"Restarting VM {vm_id} with snapshot {snapshot_name}")
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
             time.sleep(1)
@@ -301,7 +391,7 @@ class QemuManager:
             with self.registry._lock:
                 vm_info["pid"] = proc.pid
                 vm_info["status"] = "Running"
-                vm_info["monitor_port"] = monitor_port  # Update monitor port
+                vm_info["monitor_port"] = monitor_port
                 self.registry.save()
         except Exception as e:
             self.logger.error(f"Failed to restart VM {vm_id}: {e}", exc_info=True)

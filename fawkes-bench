@@ -1,0 +1,443 @@
+#!/usr/bin/env python3
+"""
+Fawkes Performance Benchmarking Tool
+
+Benchmark various Fawkes operations to measure and optimize performance.
+
+Usage:
+    fawkes-bench snapshot-revert --disk image.qcow2 --snapshot clean
+    fawkes-bench vm-lifecycle --disk image.qcow2
+    fawkes-bench full --config fawkes-config.yaml --iterations 100
+"""
+
+import argparse
+import sys
+import os
+import time
+import logging
+import subprocess
+import statistics
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from fawkes.qemu import QemuManager, pick_free_port
+from fawkes.config import FawkesConfig, VMRegistry
+from fawkes.performance import PerformanceMonitor, format_duration
+
+# Configure logging
+logging.basicConfig(
+    level=logging.WARNING,  # Quiet by default
+    format='%(levelname)s: %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+class FawkesBenchmark:
+    """Benchmark suite for Fawkes operations."""
+
+    def __init__(self, verbose: bool = False):
+        """Initialize benchmark suite."""
+        self.verbose = verbose
+        if verbose:
+            logging.getLogger().setLevel(logging.INFO)
+
+    def benchmark_snapshot_revert(self, disk_path: str, snapshot_name: str,
+                                  iterations: int = 10) -> Dict:
+        """
+        Benchmark snapshot revert performance (fast vs slow).
+
+        Args:
+            disk_path: Path to QCOW2 disk image
+            snapshot_name: Name of snapshot to revert to
+            iterations: Number of iterations
+
+        Returns:
+            Dictionary of benchmark results
+        """
+        print(f"\n{'='*80}")
+        print(f"SNAPSHOT REVERT BENCHMARK")
+        print(f"{'='*80}")
+        print(f"Disk: {disk_path}")
+        print(f"Snapshot: {snapshot_name}")
+        print(f"Iterations: {iterations}")
+        print()
+
+        if not os.path.exists(disk_path):
+            raise FileNotFoundError(f"Disk image not found: {disk_path}")
+
+        # Verify snapshot exists
+        result = subprocess.run(
+            ["qemu-img", "snapshot", "-l", disk_path],
+            capture_output=True,
+            text=True
+        )
+        if snapshot_name not in result.stdout:
+            raise ValueError(f"Snapshot '{snapshot_name}' not found in {disk_path}")
+
+        # Setup QEMU manager
+        cfg = FawkesConfig({
+            "disk_image": disk_path,
+            "snapshot_name": snapshot_name,
+            "arch": "x86_64",
+            "memory": "256M"
+        })
+        registry = VMRegistry()
+        qemu_mgr = QemuManager(cfg, registry)
+
+        try:
+            # Start a VM
+            print("Starting VM...")
+            vm_id = qemu_mgr.start_vm(disk=disk_path, memory="256M", debug=True, pause_on_start=False)
+            if not vm_id:
+                raise RuntimeError("Failed to start VM")
+
+            print(f"VM started (ID: {vm_id})")
+            time.sleep(2)  # Let VM fully boot
+
+            # Get VM info to check monitor port
+            vm_info = registry.get_vm(vm_id)
+            monitor_port = vm_info.get("monitor_port")
+
+            # Benchmark fast snapshot revert (using monitor)
+            fast_times = []
+            if monitor_port:
+                print(f"\nBenchmarking FAST snapshot revert (QEMU monitor)...")
+                for i in range(iterations):
+                    start = time.time()
+                    qemu_mgr.revert_to_snapshot(vm_id, snapshot_name, fast=True)
+                    duration = (time.time() - start) * 1000  # ms
+                    fast_times.append(duration)
+                    print(f"  Iteration {i+1}/{iterations}: {duration:.2f}ms")
+                    time.sleep(0.1)  # Brief pause between iterations
+
+                print(f"\nFast mode statistics:")
+                print(f"  Min:     {min(fast_times):.2f}ms")
+                print(f"  Max:     {max(fast_times):.2f}ms")
+                print(f"  Mean:    {statistics.mean(fast_times):.2f}ms")
+                print(f"  Median:  {statistics.median(fast_times):.2f}ms")
+                print(f"  Stdev:   {statistics.stdev(fast_times) if len(fast_times) > 1 else 0:.2f}ms")
+            else:
+                print("\nWARNING: No monitor port available, skipping fast revert test")
+
+            # Benchmark slow snapshot revert (stop and restart)
+            # Only do a few iterations since this is slow
+            slow_iterations = min(3, iterations)
+            slow_times = []
+            print(f"\nBenchmarking SLOW snapshot revert (VM restart)...")
+            for i in range(slow_iterations):
+                start = time.time()
+                qemu_mgr.revert_to_snapshot(vm_id, snapshot_name, fast=False)
+                duration = (time.time() - start) * 1000  # ms
+                slow_times.append(duration)
+                print(f"  Iteration {i+1}/{slow_iterations}: {duration:.2f}ms")
+                time.sleep(0.5)  # Pause to let VM stabilize
+
+            print(f"\nSlow mode statistics:")
+            print(f"  Min:     {min(slow_times):.2f}ms")
+            print(f"  Max:     {max(slow_times):.2f}ms")
+            print(f"  Mean:    {statistics.mean(slow_times):.2f}ms")
+            print(f"  Median:  {statistics.median(slow_times):.2f}ms")
+            if len(slow_times) > 1:
+                print(f"  Stdev:   {statistics.stdev(slow_times):.2f}ms")
+
+            # Calculate speedup
+            if fast_times and slow_times:
+                speedup = statistics.mean(slow_times) / statistics.mean(fast_times)
+                time_saved_per_exec = statistics.mean(slow_times) - statistics.mean(fast_times)
+
+                print(f"\n{'-'*80}")
+                print(f"PERFORMANCE IMPROVEMENT")
+                print(f"{'-'*80}")
+                print(f"Speedup:              {speedup:.2f}x faster")
+                print(f"Time saved per exec:  {time_saved_per_exec:.2f}ms")
+                print(f"At 100 exec/sec:      {time_saved_per_exec * 100 / 1000:.2f}s saved per second")
+                print(f"At 1000 execs/day:    {time_saved_per_exec * 1000 / 1000:.2f}s ({time_saved_per_exec * 1000 / 60000:.1f}min) saved per day")
+                print(f"{'-'*80}")
+
+            # Cleanup
+            qemu_mgr.stop_vm(vm_id, force=True)
+
+            return {
+                "fast_times": fast_times,
+                "slow_times": slow_times,
+                "speedup": speedup if fast_times and slow_times else None
+            }
+
+        except Exception as e:
+            logger.error(f"Benchmark failed: {e}", exc_info=self.verbose)
+            raise
+        finally:
+            # Cleanup
+            qemu_mgr.stop_all()
+
+    def benchmark_vm_lifecycle(self, disk_path: str, iterations: int = 5) -> Dict:
+        """
+        Benchmark VM start/stop lifecycle.
+
+        Args:
+            disk_path: Path to QCOW2 disk image
+            iterations: Number of iterations
+
+        Returns:
+            Dictionary of benchmark results
+        """
+        print(f"\n{'='*80}")
+        print(f"VM LIFECYCLE BENCHMARK")
+        print(f"{'='*80}")
+        print(f"Disk: {disk_path}")
+        print(f"Iterations: {iterations}")
+        print()
+
+        if not os.path.exists(disk_path):
+            raise FileNotFoundError(f"Disk image not found: {disk_path}")
+
+        cfg = FawkesConfig({
+            "disk_image": disk_path,
+            "arch": "x86_64",
+            "memory": "256M"
+        })
+        registry = VMRegistry()
+        qemu_mgr = QemuManager(cfg, registry)
+
+        start_times = []
+        stop_times = []
+
+        try:
+            for i in range(iterations):
+                print(f"\nIteration {i+1}/{iterations}")
+
+                # Benchmark VM start
+                start = time.time()
+                vm_id = qemu_mgr.start_vm(disk=disk_path, memory="256M", debug=True, pause_on_start=False)
+                if not vm_id:
+                    raise RuntimeError("Failed to start VM")
+                start_duration = (time.time() - start) * 1000
+                start_times.append(start_duration)
+                print(f"  VM start: {start_duration:.2f}ms")
+
+                time.sleep(1)  # Let VM stabilize
+
+                # Benchmark VM stop
+                start = time.time()
+                qemu_mgr.stop_vm(vm_id, force=False)
+                stop_duration = (time.time() - start) * 1000
+                stop_times.append(stop_duration)
+                print(f"  VM stop:  {stop_duration:.2f}ms")
+
+                time.sleep(0.5)  # Pause between iterations
+
+            print(f"\n{'-'*80}")
+            print(f"VM START STATISTICS")
+            print(f"{'-'*80}")
+            print(f"  Min:     {min(start_times):.2f}ms")
+            print(f"  Max:     {max(start_times):.2f}ms")
+            print(f"  Mean:    {statistics.mean(start_times):.2f}ms")
+            print(f"  Median:  {statistics.median(start_times):.2f}ms")
+            if len(start_times) > 1:
+                print(f"  Stdev:   {statistics.stdev(start_times):.2f}ms")
+
+            print(f"\n{'-'*80}")
+            print(f"VM STOP STATISTICS")
+            print(f"{'-'*80}")
+            print(f"  Min:     {min(stop_times):.2f}ms")
+            print(f"  Max:     {max(stop_times):.2f}ms")
+            print(f"  Mean:    {statistics.mean(stop_times):.2f}ms")
+            print(f"  Median:  {statistics.median(stop_times):.2f}ms")
+            if len(stop_times) > 1:
+                print(f"  Stdev:   {statistics.stdev(stop_times):.2f}ms")
+
+            print(f"\n{'-'*80}")
+            print(f"TOTAL LIFECYCLE")
+            print(f"{'-'*80}")
+            total_mean = statistics.mean(start_times) + statistics.mean(stop_times)
+            print(f"  Mean total: {total_mean:.2f}ms per cycle")
+            print(f"{'-'*80}")
+
+            return {
+                "start_times": start_times,
+                "stop_times": stop_times
+            }
+
+        except Exception as e:
+            logger.error(f"Benchmark failed: {e}", exc_info=self.verbose)
+            raise
+        finally:
+            qemu_mgr.stop_all()
+
+    def benchmark_testcase_throughput(self, config_path: str, duration: int = 60) -> Dict:
+        """
+        Benchmark end-to-end testcase throughput.
+
+        Args:
+            config_path: Path to Fawkes configuration file
+            duration: How long to run (seconds)
+
+        Returns:
+            Dictionary of benchmark results
+        """
+        print(f"\n{'='*80}")
+        print(f"TESTCASE THROUGHPUT BENCHMARK")
+        print(f"{'='*80}")
+        print(f"Config: {config_path}")
+        print(f"Duration: {duration}s")
+        print()
+
+        # This would require running a full fuzzing session
+        # For now, we'll just print a placeholder
+        print("This benchmark requires a full fuzzing configuration.")
+        print("Use: ./fawkes --config <config> --mode local")
+        print("Monitor performance with the TUI or logs.")
+
+        return {}
+
+
+def cmd_snapshot_revert(args):
+    """Benchmark snapshot revert command."""
+    bench = FawkesBenchmark(verbose=args.verbose)
+    try:
+        bench.benchmark_snapshot_revert(
+            args.disk,
+            args.snapshot,
+            iterations=args.iterations
+        )
+        return 0
+    except Exception as e:
+        logger.error(f"Benchmark failed: {e}")
+        return 1
+
+
+def cmd_vm_lifecycle(args):
+    """Benchmark VM lifecycle command."""
+    bench = FawkesBenchmark(verbose=args.verbose)
+    try:
+        bench.benchmark_vm_lifecycle(
+            args.disk,
+            iterations=args.iterations
+        )
+        return 0
+    except Exception as e:
+        logger.error(f"Benchmark failed: {e}")
+        return 1
+
+
+def cmd_throughput(args):
+    """Benchmark throughput command."""
+    bench = FawkesBenchmark(verbose=args.verbose)
+    try:
+        bench.benchmark_testcase_throughput(
+            args.config,
+            duration=args.duration
+        )
+        return 0
+    except Exception as e:
+        logger.error(f"Benchmark failed: {e}")
+        return 1
+
+
+def main():
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="Fawkes Performance Benchmarking Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Benchmark snapshot revert performance
+  fawkes-bench snapshot-revert --disk image.qcow2 --snapshot clean
+
+  # Benchmark VM lifecycle (start/stop)
+  fawkes-bench vm-lifecycle --disk image.qcow2
+
+  # Benchmark with more iterations
+  fawkes-bench snapshot-revert --disk image.qcow2 --snapshot clean --iterations 20
+
+  # Verbose output
+  fawkes-bench snapshot-revert --disk image.qcow2 --snapshot clean -v
+        """
+    )
+
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Enable verbose output'
+    )
+
+    subparsers = parser.add_subparsers(dest='command', help='Benchmark to run')
+    subparsers.required = True
+
+    # Snapshot revert benchmark
+    revert_parser = subparsers.add_parser(
+        'snapshot-revert',
+        help='Benchmark snapshot revert performance (fast vs slow)'
+    )
+    revert_parser.add_argument(
+        '--disk',
+        required=True,
+        help='Path to QCOW2 disk image'
+    )
+    revert_parser.add_argument(
+        '--snapshot',
+        required=True,
+        help='Name of snapshot to revert to'
+    )
+    revert_parser.add_argument(
+        '--iterations',
+        type=int,
+        default=10,
+        help='Number of iterations (default: 10)'
+    )
+    revert_parser.set_defaults(func=cmd_snapshot_revert)
+
+    # VM lifecycle benchmark
+    lifecycle_parser = subparsers.add_parser(
+        'vm-lifecycle',
+        help='Benchmark VM start/stop lifecycle'
+    )
+    lifecycle_parser.add_argument(
+        '--disk',
+        required=True,
+        help='Path to QCOW2 disk image'
+    )
+    lifecycle_parser.add_argument(
+        '--iterations',
+        type=int,
+        default=5,
+        help='Number of iterations (default: 5)'
+    )
+    lifecycle_parser.set_defaults(func=cmd_vm_lifecycle)
+
+    # Throughput benchmark
+    throughput_parser = subparsers.add_parser(
+        'throughput',
+        help='Benchmark end-to-end testcase throughput'
+    )
+    throughput_parser.add_argument(
+        '--config',
+        required=True,
+        help='Path to Fawkes configuration file'
+    )
+    throughput_parser.add_argument(
+        '--duration',
+        type=int,
+        default=60,
+        help='Duration to run (seconds, default: 60)'
+    )
+    throughput_parser.set_defaults(func=cmd_throughput)
+
+    # Parse and execute
+    args = parser.parse_args()
+
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+        return 130
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}", exc_info=args.verbose)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
