@@ -1,4 +1,4 @@
-# fawkes/qemu.py
+# qemu.py
 import signal
 import socket
 import logging
@@ -9,8 +9,8 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any
-from fawkes.config import FawkesConfig, VMRegistry
-from fawkes.arch.architectures import SupportedArchitectures
+from config import FawkesConfig, VMRegistry
+from arch.architectures import SupportedArchitectures
 from fawkes.performance import perf_tracker
 
 def pick_free_port():

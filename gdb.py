@@ -11,10 +11,10 @@ import socket
 import json
 from typing import Dict, Any, Optional
 
-from fawkes.config import FawkesConfig, VMRegistry
-from fawkes.qemu import QemuManager
-from fawkes.db.db import FawkesDB
-from fawkes.arch.architectures import SupportedArchitectures
+from config import FawkesConfig, VMRegistry
+from qemu import QemuManager
+from db.db import FawkesDB
+from arch.architectures import SupportedArchitectures
 
 class GdbFuzzWorker:
     def __init__(self, vm_id: int, qemu_mgr, timeout: int, fuzz_loop: bool = True):

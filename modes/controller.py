@@ -8,11 +8,11 @@ import tarfile
 import tempfile
 import ssl
 from pathlib import Path
-from fawkes.db.controller_db import ControllerDB
-from fawkes.db.auth_db import AuthDB
-from fawkes.globals import shutdown_event
-from fawkes.auth.middleware import add_authentication, AuthenticationError
-from fawkes.auth.tls import create_ssl_context, ensure_certificates
+from db.controller_db import ControllerDB
+from db.auth_db import AuthDB
+from globals import shutdown_event
+from auth.middleware import add_authentication, AuthenticationError
+from auth.tls import create_ssl_context, ensure_certificates
 
 logger = logging.getLogger("fawkes")
 CONTROLLER_PORT = 9999

@@ -8,11 +8,11 @@ import threading
 import signal
 import curses
 from fawkes.logger import setup_fawkes_logger
-from fawkes.config import FawkesConfig, VMRegistry, FawkesConfigError
+from config import FawkesConfig, VMRegistry, FawkesConfigError
 from fawkes.modes.local import run_local_mode
 from fawkes.modes.controller import run_controller_mode
 from fawkes.modes.worker import run_worker_mode
-from fawkes.globals import shutdown_event, get_max_vms
+from globals import shutdown_event, get_max_vms
 
 def signal_handler(sig, frame):
     """Handle SIGINT/SIGTERM for graceful shutdown."""
@@ -66,7 +66,7 @@ def main():
 
     # For just running the crash analysis on a crash and not the entire system
     if args.analyze_crashes:
-        from fawkes.analysis import load_analyzer
+        from analysis import load_analyzer
         analyzer = load_analyzer(cfg.arch, cfg.crash_dir)
         for crash_zip in glob.glob(os.path.join(cfg.crash_dir, "*.zip")):
             analyzer.analyze_crash(crash_zip)

@@ -1,11 +1,11 @@
 import logging
 import subprocess
 import time
-from fawkes.globals import shutdown_event, SystemResources
-from fawkes.qemu import QemuManager
-from fawkes.gdb import GdbFuzzManager
-from fawkes.db.db import FawkesDB
-from fawkes.harness import FileFuzzHarness
+from globals import shutdown_event, SystemResources
+from qemu import QemuManager
+from gdb import GdbFuzzManager
+from db.db import FawkesDB
+from harness import FileFuzzHarness
 from fawkes.performance import perf_tracker
 
 def run_local_mode(cfg, registry, parallel: int = 1, loop: bool = False, seed_dir: str = None):

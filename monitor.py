@@ -2,7 +2,7 @@ import psutil
 import time
 import logging
 from typing import Dict
-from fawkes.config import FawkesConfig, VMRegistry
+from config import FawkesConfig, VMRegistry
 
 logger = logging.getLogger("fawkes.monitor")
 

@@ -6,12 +6,12 @@ import time
 import json
 import zipfile
 from datetime import datetime
-from fawkes.nbd import NbdManager
-from fawkes.qemu import QemuManager
-from fawkes.config import FawkesConfig, VMRegistry
-from fawkes.db.db import FawkesDB
-from fawkes.fuzzers import load_fuzzer
-from fawkes.analysis import load_analyzer
+from nbd import NbdManager
+from qemu import QemuManager
+from config import FawkesConfig, VMRegistry
+from db.db import FawkesDB
+from fuzzers import load_fuzzer
+from analysis import load_analyzer
 from fawkes.performance import perf_tracker
 
 class FileFuzzHarness:

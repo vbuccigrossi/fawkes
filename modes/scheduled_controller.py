@@ -22,9 +22,9 @@ from pathlib import Path
 
 from fawkes.db.scheduler_db import SchedulerDB
 from fawkes.scheduler.scheduler import SchedulerOrchestrator
-from fawkes.globals import shutdown_event
-from fawkes.auth.middleware import add_authentication
-from fawkes.auth.tls import create_ssl_context, ensure_certificates
+from globals import shutdown_event
+from auth.middleware import add_authentication
+from auth.tls import create_ssl_context, ensure_certificates
 
 logger = logging.getLogger("fawkes.controller")
 CONTROLLER_PORT = 9999

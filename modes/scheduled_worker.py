@@ -17,14 +17,14 @@ import time
 import tarfile
 import platform
 import ssl
-from fawkes.globals import shutdown_event, SystemResources
-from fawkes.qemu import QemuManager
-from fawkes.gdb import GdbFuzzManager
-from fawkes.db.db import FawkesDB
-from fawkes.db.auth_db import AuthDB
-from fawkes.harness import FileFuzzHarness
-from fawkes.auth.middleware import authenticate_request, AuthenticationError, create_auth_response
-from fawkes.auth.tls import create_ssl_context, ensure_certificates
+from globals import shutdown_event, SystemResources
+from qemu import QemuManager
+from gdb import GdbFuzzManager
+from db.db import FawkesDB
+from db.auth_db import AuthDB
+from harness import FileFuzzHarness
+from auth.middleware import authenticate_request, AuthenticationError, create_auth_response
+from auth.tls import create_ssl_context, ensure_certificates
 
 logger = logging.getLogger("fawkes.worker")
 
@@ -312,7 +312,7 @@ def run_scheduled_worker(cfg):
         job_cfg.db = db
         job_cfg.job_id = job_id
         # Create a VM registry for this worker job
-        from fawkes.config import VMRegistry
+        from config import VMRegistry
         registry_path = os.path.join(os.path.dirname(job_cfg["db_path"]), f"registry_{job_id}.json")
         registry = VMRegistry(registry_path)
         qemu_mgr = QemuManager(job_cfg, registry)

@@ -24,17 +24,20 @@ from io import BytesIO
 from datetime import datetime
 
 # Fawkes specific imports
-from fawkes.logger import setup_fawkes_logger
-from fawkes.config import FawkesConfig, VMRegistry, FawkesConfigError
-from fawkes.modes.local import run_local_mode
-from fawkes.modes.controller import run_controller_mode
-from fawkes.modes.worker import run_worker_mode
-from fawkes.globals import shutdown_event, get_max_vms, SystemResources
+from logger import setup_fawkes_logger
+from config import FawkesConfig, VMRegistry, FawkesConfigError
+from modes.local import run_local_mode
+from modes.controller import run_controller_mode
+from modes.worker import run_worker_mode
+from globals import shutdown_event, get_max_vms, SystemResources
 
 # Fawkes Specific imports to collect data from the system
-from fawkes.db.db import FawkesDB
-from fawkes.monitor import ResourceMonitor
-from fawkes.db.controller_db import ControllerDB
+from db.db import FawkesDB
+from monitor import ResourceMonitor
+from db.controller_db import ControllerDB
+
+# Performance tracking
+from fawkes.performance import perf_tracker
 
 ##############################################################################
 #                               GLOBALS & THEMES
