@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""
+Fawkes Corpus Management Tool
+
+Manages fuzzing corpus: minimization, analysis, organization, and deduplication.
+"""
+
+import sys
+import argparse
+import logging
+from pathlib import Path
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from fuzzers.corpus_manager import CorpusManager
+from fuzzers.dictionary import create_dictionary_from_corpus, create_dictionary_from_crashes
+from logger import setup_fawkes_logger
+
+
+def cmd_minimize(args):
+    """Minimize corpus by removing duplicates"""
+    logger.info(f"Minimizing corpus: {args.input}")
+
+    manager = CorpusManager(args.input)
+    stats = manager.minimize(
+        output_dir=args.output,
+        keep_largest=args.keep_largest
+    )
+
+    print("\n" + "="*60)
+    print("CORPUS MINIMIZATION RESULTS")
+    print("="*60)
+    print(f"Input directory:      {args.input}")
+    print(f"Output directory:     {stats['output_dir']}")
+    print(f"Total seeds:          {stats['total_seeds']}")
+    print(f"Unique seeds:         {stats['unique_seeds']}")
+    print(f"Duplicates removed:   {stats['duplicates_removed']}")
+    print(f"Size reduction:       {stats['size_reduction_percent']:.1f}%")
+    print("="*60)
+
+
+def cmd_analyze(args):
+    """Analyze corpus and show statistics"""
+    logger.info(f"Analyzing corpus: {args.input}")
+
+    manager = CorpusManager(args.input)
+    stats = manager.analyze()
+
+    print("\n" + "="*60)
+    print("CORPUS ANALYSIS")
+    print("="*60)
+    print(f"Directory:            {args.input}")
+    print(f"Total seeds:          {stats['total_seeds']}")
+    print(f"Total size:           {stats['total_size_mb']:.2f} MB")
+    print(f"Size range:           {stats['min_size']} - {stats['max_size']} bytes")
+    print(f"Average size:         {stats['avg_size']:.0f} bytes")
+    print(f"Median size:          {stats['median_size']} bytes")
+    print("\nFile type distribution:")
+    for file_type, count in sorted(stats['type_distribution'].items(), key=lambda x: -x[1]):
+        print(f"  {file_type:15s}  {count:5d} files")
+    print("="*60)
+
+
+def cmd_organize(args):
+    """Organize corpus by file type"""
+    logger.info(f"Organizing corpus: {args.input}")
+
+    manager = CorpusManager(args.input)
+    stats = manager.organize_by_type(output_dir=args.output)
+
+    print("\n" + "="*60)
+    print("CORPUS ORGANIZATION RESULTS")
+    print("="*60)
+    print(f"Input directory:      {args.input}")
+    print(f"Output directory:     {stats['output_dir']}")
+    print("\nOrganized by type:")
+    for file_type, count in sorted(stats['type_counts'].items(), key=lambda x: -x[1]):
+        print(f"  {file_type:15s}  {count:5d} files")
+    print("="*60)
+
+
+def cmd_dedupe_testcases(args):
+    """Deduplicate testcase files"""
+    logger.info(f"Deduplicating testcases: {args.input}")
+
+    manager = CorpusManager(".")  # Dummy corpus dir
+    stats = manager.deduplicate_testcases(
+        testcase_dir=args.input,
+        output_dir=args.output
+    )
+
+    print("\n" + "="*60)
+    print("TESTCASE DEDUPLICATION RESULTS")
+    print("="*60)
+    print(f"Input directory:      {args.input}")
+    print(f"Output directory:     {stats['output_dir']}")
+    print(f"Total testcases:      {stats['total_testcases']}")
+    print(f"Unique testcases:     {stats['unique_testcases']}")
+    print(f"Duplicates removed:   {stats['duplicates_removed']}")
+    print("="*60)
+
+
+def cmd_dedupe_crashes(args):
+    """Deduplicate crash samples"""
+    logger.info(f"Deduplicating crashes: {args.input}")
+
+    manager = CorpusManager(".")  # Dummy corpus dir
+    stats = manager.deduplicate_crashes(
+        crash_dir=args.input,
+        output_dir=args.output
+    )
+
+    print("\n" + "="*60)
+    print("CRASH DEDUPLICATION RESULTS")
+    print("="*60)
+    print(f"Input directory:      {args.input}")
+    print(f"Output directory:     {stats['output_dir']}")
+    print(f"Total crashes:        {stats['total_crashes']}")
+    print(f"Unique crashes:       {stats['unique_crashes']}")
+    print(f"Duplicates removed:   {stats['duplicates_removed']}")
+    print("="*60)
+
+
+def cmd_extract_dict(args):
+    """Extract dictionary tokens from corpus or crashes"""
+    logger.info(f"Extracting dictionary: {args.input}")
+
+    if args.from_crashes:
+        dict_obj = create_dictionary_from_crashes(args.input, args.output)
+    else:
+        dict_obj = create_dictionary_from_corpus(args.input, args.output, min_freq=args.min_freq)
+
+    print("\n" + "="*60)
+    print("DICTIONARY EXTRACTION RESULTS")
+    print("="*60)
+    print(f"Input directory:      {args.input}")
+    print(f"Output file:          {args.output}")
+    print(f"Tokens extracted:     {len(dict_obj)}")
+    print("="*60)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Fawkes Corpus Management Tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Minimize corpus (remove duplicates)
+  fawkes-corpus minimize --input ~/fuzz_inputs --output ~/fuzz_inputs_min
+
+  # Analyze corpus statistics
+  fawkes-corpus analyze --input ~/fuzz_inputs
+
+  # Organize corpus by file type
+  fawkes-corpus organize --input ~/fuzz_inputs --output ~/fuzz_inputs_organized
+
+  # Deduplicate testcases
+  fawkes-corpus dedupe-testcases --input ~/.fawkes/testcases --output ~/.fawkes/testcases_unique
+
+  # Deduplicate crashes
+  fawkes-corpus dedupe-crashes --input ~/.fawkes/crashes --output ~/.fawkes/crashes_unique
+
+  # Extract dictionary from corpus
+  fawkes-corpus extract-dict --input ~/fuzz_inputs --output ~/my_dict.txt
+        """
+    )
+
+    parser.add_argument("--log-level", default="INFO",
+                       choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                       help="Set logging level")
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Minimize command
+    minimize_parser = subparsers.add_parser("minimize", help="Minimize corpus (remove duplicates)")
+    minimize_parser.add_argument("--input", "-i", required=True, help="Input corpus directory")
+    minimize_parser.add_argument("--output", "-o", help="Output directory (default: input_minimized)")
+    minimize_parser.add_argument("--keep-largest", action="store_true",
+                                help="Keep largest seed per hash (default: keep smallest)")
+
+    # Analyze command
+    analyze_parser = subparsers.add_parser("analyze", help="Analyze corpus statistics")
+    analyze_parser.add_argument("--input", "-i", required=True, help="Corpus directory to analyze")
+
+    # Organize command
+    organize_parser = subparsers.add_parser("organize", help="Organize corpus by file type")
+    organize_parser.add_argument("--input", "-i", required=True, help="Input corpus directory")
+    organize_parser.add_argument("--output", "-o", help="Output directory (default: input_organized)")
+
+    # Dedupe testcases command
+    dedupe_testcases_parser = subparsers.add_parser("dedupe-testcases", help="Deduplicate testcase files")
+    dedupe_testcases_parser.add_argument("--input", "-i", required=True, help="Testcase directory")
+    dedupe_testcases_parser.add_argument("--output", "-o", help="Output directory (default: input_unique)")
+
+    # Dedupe crashes command
+    dedupe_crashes_parser = subparsers.add_parser("dedupe-crashes", help="Deduplicate crash samples")
+    dedupe_crashes_parser.add_argument("--input", "-i", required=True, help="Crash directory")
+    dedupe_crashes_parser.add_argument("--output", "-o", help="Output directory (default: input_unique)")
+
+    # Extract dictionary command
+    extract_parser = subparsers.add_parser("extract-dict", help="Extract dictionary from corpus/crashes")
+    extract_parser.add_argument("--input", "-i", required=True, help="Input directory")
+    extract_parser.add_argument("--output", "-o", required=True, help="Output dictionary file")
+    extract_parser.add_argument("--from-crashes", action="store_true",
+                               help="Extract from crash samples instead of corpus")
+    extract_parser.add_argument("--min-freq", type=int, default=2,
+                               help="Minimum token frequency (corpus only, default: 2)")
+
+    args = parser.parse_args()
+
+    # Setup logging
+    global logger
+    log_level = logging._nameToLevel.get(args.log_level.upper(), logging.INFO)
+    logger = setup_fawkes_logger(log_level, log_to_file=False, log_to_console=True, use_color=True)
+
+    # Execute command
+    if args.command == "minimize":
+        cmd_minimize(args)
+    elif args.command == "analyze":
+        cmd_analyze(args)
+    elif args.command == "organize":
+        cmd_organize(args)
+    elif args.command == "dedupe-testcases":
+        cmd_dedupe_testcases(args)
+    elif args.command == "dedupe-crashes":
+        cmd_dedupe_crashes(args)
+    elif args.command == "extract-dict":
+        cmd_extract_dict(args)
+
+
+if __name__ == "__main__":
+    main()

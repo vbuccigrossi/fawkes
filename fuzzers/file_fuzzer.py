@@ -8,7 +8,7 @@ import shutil
 from typing import Dict, List, Optional
 import logging
 
-from fawkes.fuzzers.base import Fuzzer
+from fuzzers.base import Fuzzer
 
 logger = logging.getLogger("fawkes")
 
@@ -62,7 +62,7 @@ class FileFuzzer(Fuzzer):
             "output_dir": "~/fawkes/testcases",
             "copy_all": False
         }
-        if os.path.exists(config_path):
+        if config_path and os.path.exists(config_path):
             try:
                 with open(config_path, "r") as f:
                     cfg = json.load(f)

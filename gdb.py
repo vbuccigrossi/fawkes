@@ -15,6 +15,8 @@ from config import FawkesConfig, VMRegistry
 from qemu import QemuManager
 from db.db import FawkesDB
 from arch.architectures import SupportedArchitectures
+from crash_analysis import StackHasher
+from crash_analysis.gdb_backtrace import GDBBacktraceExtractor
 
 class GdbFuzzWorker:
     def __init__(self, vm_id: int, qemu_mgr, timeout: int, fuzz_loop: bool = True):
@@ -26,6 +28,8 @@ class GdbFuzzWorker:
         self.crash_detected = False
         self.crash_info = {}
         self.supported_archs = SupportedArchitectures
+        self.stack_hasher = StackHasher(depth=10, ignore_system_libs=True)
+        self.backtrace_extractor = None  # Will be initialized with architecture
         self.logger.debug(f"Initialized with timeout={self.timeout}")
 
 
@@ -60,6 +64,50 @@ class GdbFuzzWorker:
             self.logger.error(f"Failed to send monitor command '{command}': {e}")
             return False
 
+    def _extract_crash_details(self, gdb_output: str, crash_type: str = "kernel") -> dict:
+        """
+        Extract detailed crash information from GDB output including backtrace and stack hash.
+
+        Args:
+            gdb_output: Raw GDB output (stdout + stderr combined)
+            crash_type: Type of crash (kernel, user, etc.)
+
+        Returns:
+            Dict with backtrace, stack_hash, crash_address, signal
+        """
+        if not self.backtrace_extractor:
+            return {}
+
+        try:
+            # Extract backtrace
+            backtrace = self.backtrace_extractor._parse_gdb_backtrace(gdb_output)
+
+            # Extract crash address
+            crash_address = self.backtrace_extractor.extract_crash_address(gdb_output)
+
+            # Extract signal
+            signal = self.backtrace_extractor.extract_signal(gdb_output)
+
+            # Compute stack hash
+            stack_hash = self.stack_hasher.get_crash_signature(backtrace, signal or crash_type)
+
+            details = {
+                'backtrace': backtrace,
+                'stack_hash': stack_hash,
+                'crash_address': crash_address,
+                'signal': signal,
+                'backtrace_depth': len(backtrace)
+            }
+
+            self.logger.info(f"Extracted crash details: stack_hash={stack_hash[:16]}..., "
+                           f"backtrace_depth={len(backtrace)}, signal={signal}")
+
+            return details
+
+        except Exception as e:
+            self.logger.error(f"Failed to extract crash details: {e}")
+            return {}
+
     def start(self):
         """Start the GDB fuzz worker, checking both kernel and user-space crashes."""
         self.logger.info(f"Starting fuzz worker for VM {self.vm_id}, fuzz_loop={self.fuzz_loop}")
@@ -79,6 +127,9 @@ class GdbFuzzWorker:
             self.logger.warning(f"Unknown GDB architecture for '{arch}', using 'auto'")
             gdb_arch = "auto"
         self.logger.debug(f"Using GDB architecture '{gdb_arch}' for QEMU arch '{arch}'")
+
+        # Initialize backtrace extractor with architecture
+        self.backtrace_extractor = GDBBacktraceExtractor(arch=gdb_arch)
 
         # Prepare enhanced GDB script with better state synchronization
         # This helps with modern Windows (10+) HAL initialization
@@ -133,11 +184,21 @@ class GdbFuzzWorker:
                 self.logger.debug(f"GDB exited: stdout={stdout}, stderr={stderr}")
                 if "Program received signal" in stderr or "Segmentation fault" in stderr:
                     self.crash_detected = True
+
+                    # Extract detailed crash information including backtrace and stack hash
+                    gdb_output = stdout + "\n" + stderr
+                    crash_details = self._extract_crash_details(gdb_output, crash_type="kernel")
+
                     self.crash_info = {
                         "type": "kernel",
-                        "gdb_output": stderr
+                        "gdb_output": stderr,
+                        "backtrace": crash_details.get('backtrace'),
+                        "stack_hash": crash_details.get('stack_hash'),
+                        "crash_address": crash_details.get('crash_address'),
+                        "signal": crash_details.get('signal'),
                     }
-                    self.logger.info(f"Kernel crash detected for VM {self.vm_id}")
+                    self.logger.info(f"Kernel crash detected for VM {self.vm_id} - "
+                                   f"stack_hash={crash_details.get('stack_hash', 'N/A')[:16]}...")
                     break
 
             # Check user-space agent

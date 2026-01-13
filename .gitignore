@@ -1,0 +1,107 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Logs
+*.log
+logs/
+
+# Claude Code files
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+
+# Local configuration (may contain paths/credentials)
+# Keep .fawkes in user home, not in repo
+
+# Crash data and corpus (large files)
+crashes/
+corpus/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# VM images (large binary files)
+*.qcow2
+*.vmdk
+*.vdi
+*.img
+*.iso
+
+# Test VM directory
+fawkes_test/
+
+# Backup files
+backup/
+*.bak
+*.backup
+
+# Web frontend build artifacts
+web/frontend/node_modules/
+web/frontend/dist/
+web/frontend/build/
+
+# Web API
+web/api/__pycache__/
+web/.pytest_cache/
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Screenshots
+screenshots/
+
+# Job files (may contain sensitive config)
+jobs/
+
+# Shared directory contents
+shared/

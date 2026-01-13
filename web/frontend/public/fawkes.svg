@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="30" fill="#1f2937"/>
+
+  <!-- Stylized Guy Fawkes mask outline -->
+  <!-- Face shape -->
+  <path d="M32 8 C18 8 12 20 12 32 C12 44 18 54 32 56 C46 54 52 44 52 32 C52 20 46 8 32 8"
+        stroke="#f59e0b" stroke-width="2" fill="none"/>
+
+  <!-- Eyes -->
+  <ellipse cx="24" cy="28" rx="4" ry="3" fill="#f59e0b"/>
+  <ellipse cx="40" cy="28" rx="4" ry="3" fill="#f59e0b"/>
+
+  <!-- Eyebrows (angled, sinister) -->
+  <path d="M18 22 L28 25" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+  <path d="M46 22 L36 25" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Nose -->
+  <path d="M32 30 L30 38 L34 38 Z" fill="#f59e0b"/>
+
+  <!-- Mustache -->
+  <path d="M22 42 Q27 40 32 44 Q37 40 42 42" stroke="#f59e0b" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+  <!-- Goatee -->
+  <path d="M28 46 Q32 52 36 46" stroke="#f59e0b" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+  <!-- Cheek lines -->
+  <path d="M16 36 Q20 38 22 42" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <path d="M48 36 Q44 38 42 42" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+</svg>

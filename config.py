@@ -4,26 +4,54 @@ import json
 import threading
 from typing import Dict, Any, Optional
 
+# Import centralized paths
+try:
+    from paths import paths as fawkes_paths
+except ImportError:
+    fawkes_paths = None
+
 DEFAULT_MAX_PARALLEL_VMS = 0
+
+
+def _get_default_path(key, fallback):
+    """Get path from centralized config or use fallback."""
+    if fawkes_paths:
+        path_map = {
+            "registry_file": str(fawkes_paths.registry_file),
+            "db_path": str(fawkes_paths.database_file),
+            "controller_db_path": str(fawkes_paths.controller_database_file),
+            "share_dir": str(fawkes_paths.shared_dir),
+            "crash_dir": str(fawkes_paths.crashes_dir),
+            "job_dir": str(fawkes_paths.jobs_dir),
+            "screenshot_dir": str(fawkes_paths.screenshots_dir),
+            "corpus_dir": str(fawkes_paths.corpus_dir),
+            "images_dir": str(fawkes_paths.images_dir),
+            "iso_dir": str(fawkes_paths.iso_dir),
+        }
+        if key in path_map:
+            return path_map[key]
+    return os.path.expanduser(fallback)
+
 
 class FawkesConfigError(Exception):
     """Custom exception for Fawkes configuration or registry errors."""
     pass
 
+
 class FawkesConfig:
     def __init__(self, max_parallel_vms: int = DEFAULT_MAX_PARALLEL_VMS, registry_file: Optional[str] = None, **kwargs):
         self._data = {
             "max_parallel_vms": max_parallel_vms,
-            "registry_file": registry_file or os.path.join(os.path.expanduser("~/.fawkes"), "registry.json") ,
+            "registry_file": registry_file or _get_default_path("registry_file", "~/.fawkes/registry.json"),
             "controller_host": kwargs.get("controller_host", "0.0.0.0"),
             "controller_port": kwargs.get("controller_port", 5000),
-            "disk_image": os.path.expanduser(kwargs.get("disk_image", "~/fawkes_test/target.qcow2")),
-            "input_dir": os.path.expanduser(kwargs.get("input_dir", "~/fuzz_inputs")),
-            "share_dir": os.path.expanduser(kwargs.get("share_dir", "~/fawkes_shared")),
+            "disk_image": os.path.expanduser(kwargs.get("disk_image", "~/.fawkes/images/target.qcow2")),
+            "input_dir": os.path.expanduser(kwargs.get("input_dir", _get_default_path("corpus_dir", "~/.fawkes/corpus"))),
+            "share_dir": os.path.expanduser(kwargs.get("share_dir", _get_default_path("share_dir", "~/.fawkes/shared"))),
             "poll_interval": kwargs.get("poll_interval", 60),  # Unified poll interval (in seconds)
             "max_retries": kwargs.get("max_retries", 3),
-            "db_path": os.path.expanduser(kwargs.get("db_path", "~/.fawkes/fawkes.db")),
-            "controller_db_path": os.path.expanduser(kwargs.get("controller_db_path", "~/.fawkes/controller.db")),
+            "db_path": os.path.expanduser(kwargs.get("db_path", _get_default_path("db_path", "~/.fawkes/fawkes.db"))),
+            "controller_db_path": os.path.expanduser(kwargs.get("controller_db_path", _get_default_path("controller_db_path", "~/.fawkes/controller.db"))),
             "snapshot_name": kwargs.get("snapshot_name", "clean"),
             "tui": kwargs.get("tui", False),
             "arch": kwargs.get("arch", "x86_64"),
@@ -34,14 +62,18 @@ class FawkesConfig:
             "no_headless": False,
             "vfs": False,
             "smb": True,
-            "crash_dir": "./fawkes/crashes",
+            "crash_dir": kwargs.get("crash_dir", _get_default_path("crash_dir", "~/.fawkes/crashes")),
             "fuzzer": "file",
             "fuzzer_config": None,
             "workers": [],
-            "job_dir": "~/.fawkes/jobs/",
+            "job_dir": kwargs.get("job_dir", _get_default_path("job_dir", "~/.fawkes/jobs/")),
             "job_name": "change_me",
             "vm_params": None,
-            "job_id": None
+            "job_id": None,
+            # VM Screenshot settings (for web UI visual verification)
+            "enable_vm_screenshots": False,  # Enable VNC display for screenshots
+            "screenshot_interval": 5,  # Seconds between screenshot captures
+            "screenshot_dir": kwargs.get("screenshot_dir", _get_default_path("screenshot_dir", "~/.fawkes/screenshots"))
         }
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -65,16 +97,16 @@ class FawkesConfig:
         if not os.path.exists(config_path):
             default_cfg = {
                 "max_parallel_vms": DEFAULT_MAX_PARALLEL_VMS,
-                "registry_file": os.path.join(fawkes_dir, "registry.json"),
+                "registry_file": _get_default_path("registry_file", "~/.fawkes/registry.json"),
                 "controller_host": "0.0.0.0",
                 "controller_port": 5000,
                 "db": None,
-                "disk_image": "~/fawkes_test/target.qcow2",
-                "input_dir": "~/fuzz_inputs",
-                "share_dir": "~/fawkes_shared",
+                "disk_image": _get_default_path("images_dir", "~/.fawkes/images") + "/target.qcow2",
+                "input_dir": _get_default_path("corpus_dir", "~/.fawkes/corpus"),
+                "share_dir": _get_default_path("share_dir", "~/.fawkes/shared"),
                 "poll_interval": 60,  # Unified poll interval (in seconds)
                 "max_retries": 3,
-                "db_path": "~/.fawkes/fawkes.db",
+                "db_path": _get_default_path("db_path", "~/.fawkes/fawkes.db"),
                 "snapshot_name": "clean",
                 "tui": False,
                 "arch": "x86_64",
@@ -84,14 +116,17 @@ class FawkesConfig:
                 "no_headless": False,
                 "vfs": False,
                 "smb": True,
-                "crash_dir": "./fawkes/crashes",
+                "crash_dir": _get_default_path("crash_dir", "~/.fawkes/crashes"),
                 "fuzzer": "file",
                 "fuzzer_config": None,
                 "workers": [],
-                "job_dir": "~/.fawkes/jobs/",
+                "job_dir": _get_default_path("job_dir", "~/.fawkes/jobs/"),
                 "job_name": "change_me",
                 "vm_params": None,
-                "job_id": None
+                "job_id": None,
+                "enable_vm_screenshots": False,
+                "screenshot_interval": 5,
+                "screenshot_dir": _get_default_path("screenshot_dir", "~/.fawkes/screenshots")
             }
             with open(config_path, "w") as f:
                 json.dump(default_cfg, f, indent=2)

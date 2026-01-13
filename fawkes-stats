@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""
+Fawkes Fuzzer Statistics Viewer
+
+Displays real-time and historical fuzzing statistics.
+"""
+
+import sys
+import argparse
+import json
+import logging
+from pathlib import Path
+from datetime import datetime, timedelta
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from fuzzers.fuzzer_stats import FuzzerStats
+from logger import setup_fawkes_logger
+
+
+def cmd_view(args):
+    """View current statistics"""
+    logger.info(f"Loading statistics from: {args.stats_file}")
+
+    stats = FuzzerStats()
+    stats.load_from_file(args.stats_file)
+
+    # Print the summary
+    stats.print_summary()
+
+
+def cmd_watch(args):
+    """Watch statistics in real-time"""
+    import time
+    import os
+
+    logger.info(f"Watching statistics from: {args.stats_file}")
+    print(f"Watching {args.stats_file} (press Ctrl+C to exit)\n")
+
+    stats = FuzzerStats()
+
+    try:
+        while True:
+            # Clear screen
+            os.system('clear' if os.name != 'nt' else 'cls')
+
+            # Reload and print
+            stats.load_from_file(args.stats_file)
+            stats.print_summary()
+
+            print(f"\nRefreshing every {args.interval} seconds... (Ctrl+C to exit)")
+
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print("\n\nExiting...")
+
+
+def cmd_export(args):
+    """Export statistics to JSON"""
+    logger.info(f"Exporting statistics from {args.stats_file} to {args.output}")
+
+    stats = FuzzerStats()
+    stats.load_from_file(args.stats_file)
+
+    # Get stats as dict
+    stats_data = stats.get_stats()
+
+    # Add strategy rankings
+    stats_data["strategy_rankings"] = [
+        {
+            "strategy": strategy,
+            "crash_rate": crash_rate,
+            "attempts": attempts,
+            "crashes": crashes
+        }
+        for strategy, crash_rate, attempts, crashes in stats.get_strategy_rankings()
+    ]
+
+    # Save to file
+    with open(args.output, "w") as f:
+        json.dump(stats_data, f, indent=2)
+
+    print(f"Exported statistics to: {args.output}")
+
+
+def cmd_compare(args):
+    """Compare two statistics files"""
+    logger.info(f"Comparing {args.stats1} vs {args.stats2}")
+
+    stats1 = FuzzerStats()
+    stats1.load_from_file(args.stats1)
+    s1 = stats1.get_stats()
+
+    stats2 = FuzzerStats()
+    stats2.load_from_file(args.stats2)
+    s2 = stats2.get_stats()
+
+    print("\n" + "="*60)
+    print("STATISTICS COMPARISON")
+    print("="*60)
+    print(f"File 1: {args.stats1}")
+    print(f"File 2: {args.stats2}")
+    print("="*60)
+
+    # Compare key metrics
+    metrics = [
+        ("Total Executions", "total_execs"),
+        ("Crashes Found", "crashes_total"),
+        ("Unique Crashes", "crashes_unique"),
+        ("Exec/sec (avg)", "execs_per_sec_avg"),
+        ("Corpus Progress", "corpus_progress"),
+    ]
+
+    print(f"\n{'Metric':<25} {'File 1':>15} {'File 2':>15} {'Change':>15}")
+    print("-" * 72)
+
+    for label, key in metrics:
+        val1 = s1.get(key, 0)
+        val2 = s2.get(key, 0)
+
+        if isinstance(val1, float):
+            change = val2 - val1
+            print(f"{label:<25} {val1:>15.2f} {val2:>15.2f} {change:>+15.2f}")
+        else:
+            change = val2 - val1
+            print(f"{label:<25} {val1:>15,} {val2:>15,} {change:>+15,}")
+
+    print("="*60)
+
+
+def cmd_reset(args):
+    """Reset statistics"""
+    logger.warning(f"Resetting statistics in: {args.stats_file}")
+
+    if not args.force:
+        response = input(f"Are you sure you want to reset {args.stats_file}? [y/N] ")
+        if response.lower() != 'y':
+            print("Aborted.")
+            return
+
+    # Create fresh stats and save
+    stats = FuzzerStats(args.stats_file)
+    stats.save_to_file()
+
+    print(f"Statistics reset: {args.stats_file}")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Fawkes Fuzzer Statistics Viewer",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # View current statistics
+  fawkes-stats view --stats-file ~/.fawkes/fuzzer_stats.json
+
+  # Watch statistics in real-time
+  fawkes-stats watch --stats-file ~/.fawkes/fuzzer_stats.json --interval 5
+
+  # Export to JSON
+  fawkes-stats export --stats-file ~/.fawkes/fuzzer_stats.json --output report.json
+
+  # Compare two runs
+  fawkes-stats compare --stats1 run1.json --stats2 run2.json
+
+  # Reset statistics
+  fawkes-stats reset --stats-file ~/.fawkes/fuzzer_stats.json --force
+        """
+    )
+
+    parser.add_argument("--log-level", default="INFO",
+                       choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                       help="Set logging level")
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # View command
+    view_parser = subparsers.add_parser("view", help="View current statistics")
+    view_parser.add_argument("--stats-file", "-f", required=True,
+                            help="Statistics file to view")
+
+    # Watch command
+    watch_parser = subparsers.add_parser("watch", help="Watch statistics in real-time")
+    watch_parser.add_argument("--stats-file", "-f", required=True,
+                             help="Statistics file to watch")
+    watch_parser.add_argument("--interval", "-i", type=int, default=5,
+                             help="Refresh interval in seconds (default: 5)")
+
+    # Export command
+    export_parser = subparsers.add_parser("export", help="Export statistics to JSON")
+    export_parser.add_argument("--stats-file", "-f", required=True,
+                              help="Statistics file to export")
+    export_parser.add_argument("--output", "-o", required=True,
+                              help="Output JSON file")
+
+    # Compare command
+    compare_parser = subparsers.add_parser("compare", help="Compare two statistics files")
+    compare_parser.add_argument("--stats1", required=True,
+                               help="First statistics file")
+    compare_parser.add_argument("--stats2", required=True,
+                               help="Second statistics file")
+
+    # Reset command
+    reset_parser = subparsers.add_parser("reset", help="Reset statistics")
+    reset_parser.add_argument("--stats-file", "-f", required=True,
+                             help="Statistics file to reset")
+    reset_parser.add_argument("--force", action="store_true",
+                             help="Skip confirmation prompt")
+
+    args = parser.parse_args()
+
+    # Setup logging
+    global logger
+    log_level = logging._nameToLevel.get(args.log_level.upper(), logging.INFO)
+    logger = setup_fawkes_logger(log_level, log_to_file=False, log_to_console=True, use_color=True)
+
+    # Execute command
+    if args.command == "view":
+        cmd_view(args)
+    elif args.command == "watch":
+        cmd_watch(args)
+    elif args.command == "export":
+        cmd_export(args)
+    elif args.command == "compare":
+        cmd_compare(args)
+    elif args.command == "reset":
+        cmd_reset(args)
+
+
+if __name__ == "__main__":
+    main()

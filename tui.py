@@ -71,7 +71,9 @@ args_page = 0         # current page (0-based)
 args_per_page = 20    # number of args per page
 
 # Defined group boundaries for left/right navigation
-group_boundaries = [0, 10, 15, 20, 21]
+# GENERAL (0-9), TARGET+FUZZ (10-17), SHARING+STORAGE (18-22), DB+NETWORK (23-28),
+# AUTHENTICATION (29-34), SCHEDULER (35-36), WORKERS (37), ADVANCED (38-54)
+group_boundaries = [0, 10, 18, 23, 29, 35, 37, 38, 55]
 
 # Layout definitions
 def create_config_layout():
@@ -115,14 +117,74 @@ def create_crashes_layout():
     )
     return layout
 
+def create_performance_layout():
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=4),
+        Layout(name="body", size=30),
+        Layout(name="help", size=9),
+        Layout(name="footer", size=3),
+    )
+    return layout
+
+def create_snapshots_layout():
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=4),
+        Layout(name="body", size=30),
+        Layout(name="help", size=9),
+        Layout(name="footer", size=3),
+    )
+    return layout
+
+def create_auth_layout():
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=4),
+        Layout(name="body", size=30),
+        Layout(name="help", size=9),
+        Layout(name="footer", size=3),
+    )
+    return layout
+
+def create_fuzzer_layout():
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=4),
+        Layout(name="body", size=30),
+        Layout(name="help", size=9),
+        Layout(name="footer", size=3),
+    )
+    return layout
+
+def create_login_layout():
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=4),
+        Layout(name="body", size=30),
+        Layout(name="footer", size=3),
+    )
+    return layout
+
+# Authentication state
+is_authenticated = False
+current_user = None
+session_token = None
+login_error = None
+
 # Current screen and layout
-current_screen = "configuration"  # configuration, dashboard, help, crashes
+current_screen = "configuration"  # configuration, dashboard, help, crashes, performance, snapshots, auth, login
 previous_screen = "configuration"  # Track last non-help screen
 layouts = {
     "configuration": create_config_layout(),
     "dashboard": create_dashboard_layout(),
     "help": create_help_layout(),
     "crashes": create_crashes_layout(),
+    "performance": create_performance_layout(),
+    "snapshots": create_snapshots_layout(),
+    "auth": create_auth_layout(),
+    "fuzzer": create_fuzzer_layout(),
+    "login": create_login_layout(),
 }
 
 mode = "local"
@@ -152,11 +214,51 @@ reset_config = {
     "crash_dir": "./fawkes/crashes",
     "fuzzer": "file",
     "fuzzer_config": None,
+    "fuzzer_stats_file": "~/.fawkes/fuzzer_stats.json",
+    "fuzzer_dictionary": None,
     "workers": ["127.0.0.1", "127.0.0.1", "127.0.0.1"],
     "job_dir": "~/.fawkes/jobs/",
     "job_name": "change_me",
     "vm_params": "",
-    "log_level": "ERROR"
+    "log_level": "ERROR",
+    # Authentication options
+    "auth_enabled": False,
+    "tls_enabled": False,
+    "controller_api_key": "",
+    "auth_db_path": "~/.fawkes/auth.db",
+    "tls_cert": "~/.fawkes/certs/fawkes.crt",
+    "tls_key": "~/.fawkes/certs/fawkes.key",
+    # Scheduler options
+    "allocation_strategy": "load_aware",
+    "heartbeat_timeout": 90,
+    "worker_tags": [],
+    # Performance options
+    "memory": "512M",
+    "max_parallel_vms": 0,
+    # Advanced Fuzzing Features
+    # Persistent Mode / Snapshot Fuzzing
+    "enable_persistent": False,
+    "tmpfs_path": "/tmp/fawkes_snapshots",
+    "tmpfs_size": "2G",
+    # Corpus Synchronization
+    "enable_corpus_sync": False,
+    "sync_mode": "filesystem",
+    "sync_interval": 60,
+    # Grammar-Based Fuzzing
+    "enable_grammar": False,
+    "grammar_file": "",
+    # Network Protocol Fuzzing
+    "enable_network_fuzzing": False,
+    "network_protocol": "http",
+    # Kernel Fuzzing
+    "enable_kernel_fuzzing": False,
+    "kernel_syscalls": "open,read,write,close,mmap",
+    # Stack Deduplication
+    "enable_stack_dedup": True,
+    # Time Compression
+    "enable_time_compression": False,
+    "time_compression_shift": "auto",
+    "skip_idle_loops": True,
 }
 
 default_config = {
@@ -182,48 +284,110 @@ default_config = {
     "crash_dir": "./fawkes/crashes",
     "fuzzer": "file",
     "fuzzer_config": None,
+    "fuzzer_stats_file": "~/.fawkes/fuzzer_stats.json",
+    "fuzzer_dictionary": None,
     "workers": ["127.0.0.1", "127.0.0.1", "127.0.0.1"],
     "job_dir": "~/.fawkes/jobs/",
     "job_name": "change_me",
     "vm_params": "",
-    "log_level": "ERROR"
+    "log_level": "ERROR",
+    # Authentication options
+    "auth_enabled": False,
+    "tls_enabled": False,
+    "controller_api_key": "",
+    "auth_db_path": "~/.fawkes/auth.db",
+    "tls_cert": "~/.fawkes/certs/fawkes.crt",
+    "tls_key": "~/.fawkes/certs/fawkes.key",
+    # Scheduler options
+    "allocation_strategy": "load_aware",
+    "heartbeat_timeout": 90,
+    "worker_tags": [],
+    # Performance options
+    "memory": "512M",
+    "max_parallel_vms": 0,
+    # Advanced Fuzzing Features
+    # Persistent Mode / Snapshot Fuzzing
+    "enable_persistent": False,
+    "tmpfs_path": "/tmp/fawkes_snapshots",
+    "tmpfs_size": "2G",
+    # Corpus Synchronization
+    "enable_corpus_sync": False,
+    "sync_mode": "filesystem",
+    "sync_interval": 60,
+    # Grammar-Based Fuzzing
+    "enable_grammar": False,
+    "grammar_file": "",
+    # Network Protocol Fuzzing
+    "enable_network_fuzzing": False,
+    "network_protocol": "http",
+    # Kernel Fuzzing
+    "enable_kernel_fuzzing": False,
+    "kernel_syscalls": "open,read,write,close,mmap",
+    # Stack Deduplication
+    "enable_stack_dedup": True,
+    # Time Compression
+    "enable_time_compression": False,
+    "time_compression_shift": "auto",
+    "skip_idle_loops": True,
 }
 
 # Fields: (section, config_key, display_label)
 fields = [
     ("GENERAL", "job_name",             "Job Name"),
-    ("GENERAL", "max_parallel",             "Max VMs"),
+    ("GENERAL", "max_parallel",         "Max VMs"),
+    ("GENERAL", "max_parallel_vms",     "Max Parallel VMs"),
+    ("GENERAL", "memory",               "VM Memory"),
     ("GENERAL", "tui",                  "TUI"),
     ("GENERAL", "cleanup_stopped_vms",  "Cleanup VMs"),
     ("GENERAL", "timeout",              "Timeout"),
     ("GENERAL", "loop",                 "Loop"),
     ("GENERAL", "no_headless",          "No Headless"),
     ("GENERAL", "vm_params",            "VM Params"),
-    ("TARGET + FUZZ", "disk_image",     "Disk Image"),
-    ("TARGET + FUZZ", "input_dir",      "Input Dir"),
-    ("TARGET + FUZZ", "snapshot_name",  "Snapshot Name"),
-    ("TARGET + FUZZ", "arch",           "Arch"),
-    ("TARGET + FUZZ", "fuzzer",         "Fuzzer"),
-    ("TARGET + FUZZ", "fuzzer_config",  "Fuzzer Config"),
-    ("TARGET + FUZZ", "", ""),
-    ("TARGET + FUZZ", "", ""),
+    ("TARGET + FUZZ", "disk_image",          "Disk Image"),
+    ("TARGET + FUZZ", "input_dir",           "Input Dir"),
+    ("TARGET + FUZZ", "snapshot_name",       "Snapshot Name"),
+    ("TARGET + FUZZ", "arch",                "Arch"),
+    ("TARGET + FUZZ", "fuzzer",              "Fuzzer"),
+    ("TARGET + FUZZ", "fuzzer_config",       "Fuzzer Config"),
+    ("TARGET + FUZZ", "fuzzer_stats_file",   "Fuzzer Stats"),
+    ("TARGET + FUZZ", "fuzzer_dictionary",   "Fuzzer Dictionary"),
     ("SHARING + STORAGE", "vfs",            "VFS"),
     ("SHARING + STORAGE", "smb",            "SMB"),
     ("SHARING + STORAGE", "crash_dir",      "Crash Dir"),
     ("SHARING + STORAGE", "share_dir",      "Share Dir"),
     ("SHARING + STORAGE", "log_level",      "Log Level"),
-    ("SHARING + STORAGE", "", ""),
-    ("SHARING + STORAGE", "", ""),
-    ("SHARING + STORAGE", "", ""),
     ("DB + NETWORK", "db_path",             "DB"),
     ("DB + NETWORK", "controller_db_path",  "Controller DB"),
     ("DB + NETWORK", "controller_host",     "Host"),
     ("DB + NETWORK", "controller_port",     "Port"),
-    ("DB + NETWORK", "", ""),
-    ("DB + NETWORK", "", ""),
-    ("DB + NETWORK", "", ""),
-    ("DB + NETWORK", "", ""),
+    ("DB + NETWORK", "poll_interval",       "Poll Interval"),
+    ("DB + NETWORK", "job_dir",             "Job Dir"),
+    ("AUTHENTICATION", "auth_enabled",      "Auth Enabled"),
+    ("AUTHENTICATION", "tls_enabled",       "TLS Enabled"),
+    ("AUTHENTICATION", "controller_api_key","API Key"),
+    ("AUTHENTICATION", "auth_db_path",      "Auth DB"),
+    ("AUTHENTICATION", "tls_cert",          "TLS Cert"),
+    ("AUTHENTICATION", "tls_key",           "TLS Key"),
+    ("SCHEDULER", "allocation_strategy",    "Strategy"),
+    ("SCHEDULER", "heartbeat_timeout",      "Heartbeat Timeout"),
     ("WORKERS", "workers", "Workers"),
+    # Advanced Fuzzing Features
+    ("ADVANCED", "enable_persistent",       "Persistent Mode"),
+    ("ADVANCED", "tmpfs_path",              "tmpfs Path"),
+    ("ADVANCED", "tmpfs_size",              "tmpfs Size"),
+    ("ADVANCED", "enable_corpus_sync",      "Corpus Sync"),
+    ("ADVANCED", "sync_mode",               "Sync Mode"),
+    ("ADVANCED", "sync_interval",           "Sync Interval (s)"),
+    ("ADVANCED", "enable_grammar",          "Grammar Fuzzing"),
+    ("ADVANCED", "grammar_file",            "Grammar File"),
+    ("ADVANCED", "enable_network_fuzzing",  "Network Fuzzing"),
+    ("ADVANCED", "network_protocol",        "Network Protocol"),
+    ("ADVANCED", "enable_kernel_fuzzing",   "Kernel Fuzzing"),
+    ("ADVANCED", "kernel_syscalls",         "Kernel Syscalls"),
+    ("ADVANCED", "enable_stack_dedup",      "Stack Dedup"),
+    ("ADVANCED", "enable_time_compression", "Time Compression"),
+    ("ADVANCED", "time_compression_shift",  "icount Shift"),
+    ("ADVANCED", "skip_idle_loops",         "Skip Idle Loops"),
 ]
 
 # A list of argument entries: (argument, description)
@@ -236,27 +400,63 @@ args_help_entries = [
     ("arch", "Target architecture for QEMU (default: x86_64). Choices: i386, x86_64, aarch64, mips, mipsel, sparc, sparc64, arm, ppc, ppc64."),
     ("timeout", "Timeout per testcase in seconds. Default: 60"),
     ("Max VMs", "Number of parallel VMs (0 for auto). Default: 0"),
+    ("Max Parallel VMs", "Maximum parallel VMs for performance control. Default: 0 (no limit)"),
+    ("VM Memory", "Memory allocation for VMs (e.g., 256M, 512M, 1G). Default: 512M"),
     ("loop", "Run fuzzing in an infinite loop. Default: True"),
     ("seed dir", "Directory containing the seed files for fuzzing."),
     ("no_headless", "Turn off headless mode default False."),
     ("vfs", "Use VirtFS for sharing (Linux/Unix only)."),
     ("smb", "Use SMB for sharing (Windows only)."),
     ("crash dir", "Directory to store crash archives. Default: ./fawkes/crashes"),
-    ("fuzzer", "Fuzzer plugin to use (e.g., file, network). Default: file"),
-    ("fuzzer config", "JSON config file for fuzzer."),
+    ("fuzzer", "Fuzzer plugin to use (file, network, intelligent). Default: file"),
+    ("fuzzer config", "JSON config file for intelligent fuzzer (mutations, strategies, etc.)."),
+    ("Fuzzer Stats", "Statistics file path for intelligent fuzzer. Default: ~/.fawkes/fuzzer_stats.json"),
+    ("Fuzzer Dictionary", "Dictionary file for format-aware fuzzing. Auto-generated if not specified."),
     ("host", "The IP address to bind to in distributed mode (default: 0.0.0.0)."),
     ("port", "The port to listen on (default: 5000)."),
     ("poll interval", "How often the controller polls for results (default: 60)."),
     ("job dir", "The location for the job configs for the controller (default: ~/.fawkes/jobs/)."),
     ("workers", "A comma separated list of IP/Hostnames of the Fuzz Workers"),
-    ("VM Params", "The base args to be passed to the VM on start (-smp 4 -cpu Skylake-Client-v3 -enable-kvm -m 4096)")
+    ("VM Params", "The base args to be passed to the VM on start (-smp 4 -cpu Skylake-Client-v3 -enable-kvm -m 4096)"),
+    ("Auth Enabled", "Enable authentication for distributed mode. Default: False"),
+    ("TLS Enabled", "Enable TLS encryption for network communication. Default: False"),
+    ("API Key", "Controller API key for authentication in distributed mode."),
+    ("Auth DB", "Path to authentication database. Default: ~/.fawkes/auth.db"),
+    ("TLS Cert", "Path to TLS certificate file. Default: ~/.fawkes/certs/fawkes.crt"),
+    ("TLS Key", "Path to TLS private key file. Default: ~/.fawkes/certs/fawkes.key"),
+    ("Strategy", "Scheduler allocation strategy: load_aware, round_robin, first_fit. Default: load_aware"),
+    ("Heartbeat Timeout", "Worker heartbeat timeout in seconds. Default: 90"),
+    # Advanced Fuzzing Features
+    ("Persistent Mode", "Enable persistent mode fuzzing for 10-400x speedup. Uses fast snapshot restoration. Default: False"),
+    ("tmpfs Path", "Path to tmpfs mount for snapshot storage. RAM-based storage for 5-10x I/O speedup. Default: /tmp/fawkes_snapshots"),
+    ("tmpfs Size", "Size of tmpfs mount (e.g., 1G, 2G, 4G). Stores snapshots in RAM. Default: 2G"),
+    ("Corpus Sync", "Enable distributed corpus synchronization between workers. Shares interesting testcases. Default: False"),
+    ("Sync Mode", "Corpus sync mode: filesystem, network, redis. Default: filesystem"),
+    ("Sync Interval (s)", "How often to sync corpus in seconds. Default: 60"),
+    ("Grammar Fuzzing", "Enable grammar-based fuzzing for structured inputs (JSON, XML, SQL, etc.). Default: False"),
+    ("Grammar File", "Path to BNF/EBNF grammar file. Use builtin grammars: json, xml, sql, url, arithmetic, email."),
+    ("Network Fuzzing", "Enable stateful network protocol fuzzing. Multi-stage protocol sequences. Default: False"),
+    ("Network Protocol", "Protocol to fuzz: http, ftp, smtp, pop3, imap, ssh, telnet. Default: http"),
+    ("Kernel Fuzzing", "Enable kernel fuzzing with syscall generation and KASAN integration. Default: False"),
+    ("Kernel Syscalls", "Comma-separated list of syscalls to fuzz (e.g., open,read,write,ioctl,mmap). Default: open,read,write,close,mmap"),
+    ("Stack Dedup", "Enable stack hash deduplication to identify unique crashes accurately. Default: True"),
+    ("Time Compression", "Skip idle time, sleep() calls, and delays for 3-10x speedup. Uses QEMU icount mode. Works on Linux and Windows VMs. Default: False"),
+    ("icount Shift", "QEMU icount shift parameter controlling time advancement rate. 'auto' lets QEMU optimize automatically. Options: auto, 0-10. Default: auto"),
+    ("Skip Idle Loops", "Skip sleep() calls and idle loops (QEMU align=off,sleep=off). Maximizes speedup but may affect timing-sensitive apps. Default: True"),
+    ("[F] Performance", "View real-time performance metrics including exec/sec, timing breakdowns, and snapshot optimization stats."),
+    ("[M] Snapshots", "Manage QEMU snapshots. View available snapshots and their details. Use fawkes-snapshot CLI for management."),
+    ("[A] Authentication", "View users and API keys. Manage authentication using the fawkes-auth CLI tool."),
+    ("[Z] Fuzzer", "View intelligent fuzzer statistics including exec/sec, crashes by type, and mutation strategy effectiveness."),
+    ("[D] Dashboard", "View active fuzzing jobs, VM status, and campaign statistics."),
+    ("[X] Crashes", "Browse and filter crash reports. View crash details and navigate through crash history."),
+    ("[C] Configuration", "Edit all Fawkes configuration options including auth, TLS, scheduler, and performance settings."),
 ]
 
 def shutdown_handler(sig, frame):
     shutdown_event.set()
 
 def get_group_index(field_index: int) -> int:
-    """Return which group (0 to 3) the field_index belongs to."""
+    """Return which group (0 to 6) the field_index belongs to."""
     for g in range(len(group_boundaries) - 1):
         if group_boundaries[g] <= field_index < group_boundaries[g + 1]:
             return g
@@ -267,8 +467,8 @@ def jump_to_group(g: int):
     global selected_field
     if g < 0:
         g = 0
-    if g > 3:
-        g = 3
+    if g > 6:  # We now have 7 groups (0-6)
+        g = 6
     selected_field = group_boundaries[g]
 
 ##############################################################################
@@ -384,11 +584,15 @@ class FawkesDataCollection:
             stats = self.monitor.update()
             max_vms = self.system_resources.get_max_vms()
             total = stats['running_vms'] + max_vms
+
+            # Check time compression status
+            time_comp_status = "[green]ON[/]" if default_config.get('enable_time_compression', False) else "[dim]OFF[/]"
+
             return [
                 ("VMs Online", f"{stats['running_vms']} / {total}"),
                 ("CPU Usage", f"{stats['cpu_percent']:.1f}%"),
                 ("RAM Usage", f"{stats['memory_percent']:.1f}%"),
-                ("", ""),
+                ("Time Compress", time_comp_status),
                 ("", ""),
                 ("", ""),
             ]
@@ -765,37 +969,53 @@ def config_table(title: str, row_info: list[tuple[str, str, str]], highlight_idx
     return Panel(table, title=f"[bold bright_blue]{title}", border_style="bright_blue")
 
 def update_config_body(layout):
+    # Group all fields by their section
     general_fields = [f for f in fields if f[0] == "GENERAL"]
     target_fields = [f for f in fields if f[0] == "TARGET + FUZZ"]
     sharing_fields = [f for f in fields if f[0] == "SHARING + STORAGE"]
     dbnet_fields = [f for f in fields if f[0] == "DB + NETWORK"]
+    auth_fields = [f for f in fields if f[0] == "AUTHENTICATION"]
+    scheduler_fields = [f for f in fields if f[0] == "SCHEDULER"]
     worker_fields = [f for f in fields if f[0] == "WORKERS"]
-    gen_count = len(general_fields)
-    tgt_count = len(target_fields)
-    share_count = len(sharing_fields)
-    db_count = len(dbnet_fields)
-    w_count = len(worker_fields)
 
     def highlight_index(base, count):
+        """Return the local index if selected_field is in this group's range"""
         if base <= selected_field < base + count:
             return selected_field - base
         return -1
 
-    general_highlight = highlight_index(0, gen_count)
-    target_highlight = highlight_index(8, tgt_count)
-    sharing_highlight = highlight_index(16, share_count)
-    db_highlight = highlight_index(24, db_count + 1)
-    w_highlight = highlight_index(32, w_count)
+    # Calculate highlights using the correct group_boundaries
+    # GENERAL: 0-9 (10 fields)
+    general_highlight = highlight_index(0, len(general_fields))
+    # TARGET+FUZZ: 10-17 (8 fields)
+    target_highlight = highlight_index(10, len(target_fields))
+    # SHARING+STORAGE: 18-22 (5 fields)
+    sharing_highlight = highlight_index(18, len(sharing_fields))
+    # DB+NETWORK: 23-28 (6 fields)
+    db_highlight = highlight_index(23, len(dbnet_fields))
+    # AUTHENTICATION: 29-34 (6 fields)
+    auth_highlight = highlight_index(29, len(auth_fields))
+    # SCHEDULER: 35-36 (2 fields)
+    scheduler_highlight = highlight_index(35, len(scheduler_fields))
+    # WORKERS: 37 (1 field)
+    w_highlight = highlight_index(37, len(worker_fields))
 
+    # Create panels for all groups
     gen_panel = config_table("GENERAL", general_fields, highlight_idx=general_highlight)
     tgt_panel = config_table("TARGET + FUZZ", target_fields, highlight_idx=target_highlight)
     sh_panel = config_table("SHARING + STORAGE", sharing_fields, highlight_idx=sharing_highlight)
     db_panel = config_table("DB + NETWORK", dbnet_fields, highlight_idx=db_highlight)
+    auth_panel = config_table("AUTHENTICATION", auth_fields, highlight_idx=auth_highlight)
+    sched_panel = config_table("SCHEDULER", scheduler_fields, highlight_idx=scheduler_highlight)
     w_panel = config_table("WORKERS", worker_fields, highlight_idx=w_highlight)
 
-    layout["body"].update(
-        Columns([gen_panel, tgt_panel, sh_panel, db_panel, w_panel], equal=True, expand=True)
-    )
+    # Display in two rows to fit all 7 groups
+    # Row 1: GENERAL, TARGET+FUZZ, SHARING+STORAGE, DB+NETWORK
+    # Row 2: AUTHENTICATION, SCHEDULER, WORKERS
+    row1 = Columns([gen_panel, tgt_panel, sh_panel, db_panel], equal=True, expand=True)
+    row2 = Columns([auth_panel, sched_panel, w_panel], equal=True, expand=True)
+
+    layout["body"].update(Group(row1, row2))
 
 def args_help_panel(page: int, per_page: int) -> Panel:
     start = page * per_page
@@ -812,24 +1032,41 @@ def args_help_panel(page: int, per_page: int) -> Panel:
 
 def crashes_table(crashes, selected_idx=-1):
     """Create a table of crashes with optional highlighting."""
-    table = Table(title=f"[bold green]Crashes (Filters: {', '.join(crash_filters or ['None'])}) (Page {crash_page+1})[/]", 
+    table = Table(title=f"[bold green]Crashes (Filters: {', '.join(crash_filters or ['None'])}) (Page {crash_page+1})[/]",
                   border_style="bright_blue", expand=True)
-    table.add_column("ID", style="bright_white", justify="right", width=8)
-    table.add_column("Type", style="red", width=12)
-    table.add_column("Sig", style="magenta", width=10)
-    table.add_column("EXP", style="cyan", width=10)
-    table.add_column("Job", style="green", justify="right", width=8)
-    table.add_column("Path", style="bright_black")
-    table.add_column("Time", style="yellow", width=20)
+    table.add_column("ID", style="bright_white", justify="right", width=6)
+    table.add_column("Type", style="red", width=10)
+    table.add_column("EXP", style="cyan", width=8)
+    table.add_column("Sev", style="yellow", width=6)
+    table.add_column("San", style="magenta", width=8)
+    table.add_column("Uniq", style="green", width=4)
+    table.add_column("Job", style="green", justify="right", width=6)
+    table.add_column("Path", style="bright_black", width=25)
+    table.add_column("Time", style="yellow", width=16)
     for i, crash in enumerate(crashes):
         style = "reverse" if i == selected_idx else ""
+
+        # Severity with color
+        severity = crash.get("severity", "?")
+        severity_colored = {"HIGH": "[red]HIGH[/]", "MEDIUM": "[yellow]MED[/]", "LOW": "[green]LOW[/]"}.get(severity, "?")
+
+        # Sanitizer type (abbreviated)
+        sanitizer = crash.get("sanitizer_type", "")
+        san_abbrev = {"ASAN": "ASAN", "UBSAN": "UBSAN", "MSAN": "MSAN", "TSAN": "TSAN"}.get(sanitizer, "-")
+
+        # Unique indicator
+        is_unique = crash.get("is_unique", 1)
+        unique_str = "✓" if is_unique else "×"
+
         table.add_row(
             crash["id"],
-            crash["type"],
-            crash["sig"],
-            crash["exp_colored"],
+            crash["type"][:10],  # Truncate type
+            crash["exp_colored"][:8],  # Truncate exploitability
+            severity_colored,
+            san_abbrev,
+            unique_str,
             crash["job"],
-            crash["path"],
+            crash["path"][:24],  # Truncate path
             crash["timestamp"],
             style=style
         )
@@ -838,12 +1075,27 @@ def crashes_table(crashes, selected_idx=-1):
 def crash_details_panel(crash_data):
     """Create a modal panel for crash details."""
     tbl = Table.grid(padding=(0, 1))
-    tbl.add_column(style="bold bright_white", width=15)
+    tbl.add_column(style="bold bright_white", width=18)
     tbl.add_column(style="bright_cyan")
     tbl.add_row("ID:", crash_data["id"])
     tbl.add_row("Type:", crash_data["type"])
     tbl.add_row("Signature:", crash_data["sig"])
     tbl.add_row("Exploitability:", crash_data["exp"])
+
+    # Advanced fuzzing fields
+    if crash_data.get("stack_hash"):
+        tbl.add_row("Stack Hash:", crash_data["stack_hash"][:16] + "...")
+    if crash_data.get("sanitizer_type"):
+        tbl.add_row("Sanitizer:", crash_data["sanitizer_type"])
+    if crash_data.get("severity"):
+        severity_color = {"HIGH": "red", "MEDIUM": "yellow", "LOW": "green"}.get(crash_data["severity"], "white")
+        tbl.add_row("Severity:", f"[{severity_color}]{crash_data['severity']}[/]")
+    if crash_data.get("is_unique") is not None:
+        unique_str = "Yes" if crash_data["is_unique"] else "No"
+        tbl.add_row("Unique:", unique_str)
+    if crash_data.get("duplicate_count") and crash_data["duplicate_count"] > 0:
+        tbl.add_row("Duplicates:", str(crash_data["duplicate_count"]))
+
     tbl.add_row("Job ID:", crash_data["job"])
     tbl.add_row("Path:", crash_data["path"])
     tbl.add_row("Timestamp:", crash_data["timestamp"])
@@ -853,8 +1105,8 @@ def crash_details_panel(crash_data):
         tbl,
         title=f"[bold bright_blue]Crash {crash_data['id']} Details[/]",
         border_style="bright_blue",
-        width=80,
-        height=20,
+        width=90,
+        height=25,
         padding=(1, 2)
     )
 
@@ -1009,38 +1261,525 @@ def update_crashes(layout):
 
     layout["help"].update(update_help())
 
+def update_performance(layout):
+    """Update performance metrics page."""
+    from fawkes.performance import perf_tracker
+
+    stats = perf_tracker.get_stats()
+
+    # Create performance table
+    perf_table = Table(title="Performance Metrics", border_style="green", show_header=True)
+    perf_table.add_column("Metric", style="cyan", width=30)
+    perf_table.add_column("Value", style="yellow", width=20)
+
+    # Overall metrics
+    perf_table.add_row("Exec/sec (average)", f"{stats.get('exec_per_sec', 0):.2f}")
+    perf_table.add_row("Exec/sec (recent)", f"{stats.get('exec_per_sec_recent', 0):.2f}")
+    perf_table.add_row("Total Testcases", str(stats.get('total_testcases', 0)))
+    perf_table.add_row("Total Crashes", str(stats.get('total_crashes', 0)))
+    perf_table.add_row("Elapsed Time", f"{stats.get('elapsed_seconds', 0):.1f}s")
+
+    # Time compression status
+    perf_table.add_row("", "")  # Separator
+    perf_table.add_row("[bold]Time Compression[/]", "")
+
+    time_comp_enabled = default_config.get('enable_time_compression', False)
+    if time_comp_enabled:
+        shift = default_config.get('time_compression_shift', 'auto')
+        skip_idle = default_config.get('skip_idle_loops', True)
+
+        perf_table.add_row("  Status", "[green]ENABLED[/]")
+        perf_table.add_row("  icount shift", f"{shift}")
+        perf_table.add_row("  Skip idle loops", "[green]Yes[/]" if skip_idle else "[yellow]No[/]")
+        perf_table.add_row("  Expected speedup", "[green]3-10x[/]")
+
+        # Show QEMU command snippet
+        icount_cmd = f"shift={shift}"
+        if skip_idle:
+            icount_cmd += ",align=off,sleep=off"
+        perf_table.add_row("  QEMU icount", f"{icount_cmd}")
+    else:
+        perf_table.add_row("  Status", "[red]DISABLED[/]")
+        perf_table.add_row("  Note", "[dim]Enable in Config > ADVANCED[/]")
+        perf_table.add_row("  Potential speedup", "[yellow]3-10x available[/]")
+
+    # Timing breakdown if available
+    if stats.get('timings'):
+        perf_table.add_row("", "")  # Separator
+        perf_table.add_row("[bold]Timing Breakdown[/]", "[bold]Avg (ms)[/]")
+        for operation, timing in sorted(stats['timings'].items())[:10]:  # Show top 10
+            avg_ms = timing.get('avg_ms', 0)
+            perf_table.add_row(f"  {operation}", f"{avg_ms:.2f}")
+
+    # Snapshot revert optimization stats if available
+    if 'snapshot_revert_fast' in stats.get('timings', {}) and 'snapshot_revert_slow' in stats.get('timings', {}):
+        fast_avg = stats['timings']['snapshot_revert_fast'].get('avg_ms', 0)
+        slow_avg = stats['timings']['snapshot_revert_slow'].get('avg_ms', 0)
+        speedup = slow_avg / fast_avg if fast_avg > 0 else 0
+
+        perf_table.add_row("", "")  # Separator
+        perf_table.add_row("[bold]Snapshot Optimization[/]", "")
+        perf_table.add_row("  Fast mode avg", f"{fast_avg:.2f}ms")
+        perf_table.add_row("  Slow mode avg", f"{slow_avg:.2f}ms")
+        perf_table.add_row("  Speedup", f"{speedup:.2f}x")
+
+    # Add padding rows to maintain consistent height
+    perf_table.add_row("", "")
+    perf_table.add_row("", "")
+
+    layout["body"].update(Panel(perf_table, border_style="green"))
+    layout["help"].update(update_help())
+
+def update_snapshots(layout):
+    """Update snapshot management page."""
+    import subprocess
+
+    # Get disk image from config
+    cfg = FawkesConfig.load()
+    disk_path = os.path.expanduser(cfg.get("disk_image", ""))
+
+    # Create snapshots table
+    snap_table = Table(title=f"Snapshots in {disk_path}", border_style="cyan", show_header=True)
+    snap_table.add_column("ID", style="yellow", width=5)
+    snap_table.add_column("Name", style="cyan", width=20)
+    snap_table.add_column("VM Size", style="green", width=12)
+    snap_table.add_column("Date", style="white", width=20)
+
+    # List snapshots using qemu-img
+    try:
+        if os.path.exists(disk_path):
+            result = subprocess.run(
+                ["qemu-img", "snapshot", "-l", disk_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+
+            lines = result.stdout.strip().split('\n')
+            for line in lines[2:]:  # Skip header
+                if not line.strip():
+                    continue
+                parts = line.split()
+                if len(parts) >= 5:
+                    snap_id = parts[0]
+                    snap_name = parts[1]
+                    vm_size = parts[2]
+                    date_str = f"{parts[3]} {parts[4]}"
+
+                    # Highlight current snapshot
+                    if snap_name == cfg.get("snapshot_name"):
+                        snap_name = f"[bold green]{snap_name}[/] (current)"
+
+                    snap_table.add_row(snap_id, snap_name, vm_size, date_str)
+        else:
+            snap_table.add_row("", f"Disk not found: {disk_path}", "", "")
+
+    except FileNotFoundError:
+        snap_table.add_row("", "qemu-img not found", "", "")
+    except subprocess.CalledProcessError as e:
+        snap_table.add_row("", f"Error: {e.stderr[:50]}", "", "")
+    except Exception as e:
+        snap_table.add_row("", f"Error: {str(e)[:50]}", "", "")
+
+    # Add help text with padding
+    help_text = (
+        "\n[cyan]Use the fawkes-snapshot CLI tool for snapshot management:[/]\n\n"
+        "  fawkes-snapshot list --disk <path>\n"
+        "  fawkes-snapshot create --disk <path> --name <name>\n"
+        "  fawkes-snapshot validate --disk <path> --name <name>\n"
+        "  fawkes-snapshot delete --disk <path> --name <name>\n\n\n\n"
+    )
+
+    layout["body"].update(Panel(Group(snap_table, help_text), border_style="cyan"))
+    layout["help"].update(update_help())
+
+def update_auth(layout):
+    """Update authentication/user management page."""
+    cfg = FawkesConfig.load()
+    auth_enabled = cfg.get("auth_enabled", False)
+    auth_db_path = os.path.expanduser(cfg.get("auth_db_path", "~/.fawkes/auth.db"))
+
+    if not auth_enabled:
+        no_auth_msg = (
+            "[yellow]Authentication is currently DISABLED[/]\n\n"
+            "To enable authentication:\n"
+            "1. Set 'auth_enabled' to true in configuration\n"
+            "2. Optionally enable TLS with 'tls_enabled'\n"
+            "3. Configure 'auth_db_path' if needed\n\n"
+            "Use the fawkes-auth CLI tool to manage users and API keys.\n\n\n\n\n\n\n"
+        )
+        layout["body"].update(Panel(no_auth_msg, title="Authentication Disabled", border_style="yellow"))
+        layout["help"].update(update_help())
+        return
+
+    # Try to load auth database
+    try:
+        from db.auth_db import AuthDB
+        auth_db = AuthDB(auth_db_path)
+
+        # Create users table
+        users_table = Table(title="Users", border_style="green", show_header=True)
+        users_table.add_column("ID", style="yellow", width=5)
+        users_table.add_column("Username", style="cyan", width=15)
+        users_table.add_column("Role", style="green", width=10)
+        users_table.add_column("Enabled", style="white", width=8)
+        users_table.add_column("Last Login", style="white", width=20)
+
+        users = auth_db.list_users()
+        for user in users[:10]:  # Show up to 10 users
+            last_login = "Never"
+            if user.get("last_login"):
+                last_login = datetime.fromtimestamp(user["last_login"]).strftime("%Y-%m-%d %H:%M")
+
+            enabled_str = "[green]Yes[/]" if user["enabled"] else "[red]No[/]"
+            users_table.add_row(
+                str(user["user_id"]),
+                user["username"],
+                user["role"],
+                enabled_str,
+                last_login
+            )
+
+        if not users:
+            users_table.add_row("", "No users found", "", "", "")
+
+        # Create API keys table
+        api_table = Table(title="API Keys", border_style="cyan", show_header=True)
+        api_table.add_column("ID", style="yellow", width=5)
+        api_table.add_column("Name", style="cyan", width=20)
+        api_table.add_column("Type", style="green", width=10)
+        api_table.add_column("Worker ID", style="white", width=15)
+        api_table.add_column("Enabled", style="white", width=8)
+
+        api_keys = auth_db.list_api_keys()
+        for key in api_keys[:10]:  # Show up to 10 keys
+            enabled_str = "[green]Yes[/]" if key["enabled"] else "[red]No[/]"
+            worker_id = key.get("worker_id") or "-"
+            api_table.add_row(
+                str(key["key_id"]),
+                key["key_name"],
+                key["key_type"],
+                worker_id,
+                enabled_str
+            )
+
+        if not api_keys:
+            api_table.add_row("", "No API keys found", "", "", "")
+
+        # Help text with padding
+        help_text = (
+            "\n[cyan]Use the fawkes-auth CLI tool for user management:[/]\n\n"
+            "  fawkes-auth user create <username> --role <admin|operator|viewer>\n"
+            "  fawkes-auth user list\n"
+            "  fawkes-auth user disable <username>\n"
+            "  fawkes-auth key create <name> --type worker\n"
+            "  fawkes-auth key list\n"
+            "  fawkes-auth key revoke <key_id>\n\n\n"
+        )
+
+        auth_db.close()
+        layout["body"].update(Panel(Group(users_table, api_table, help_text), border_style="green"))
+
+    except FileNotFoundError:
+        error_msg = (
+            f"[red]Auth database not found:[/] {auth_db_path}\n\n"
+            "Use the fawkes-auth CLI tool to initialize:\n"
+            "  fawkes-auth init\n\n\n\n\n\n\n\n"
+        )
+        layout["body"].update(Panel(error_msg, title="Database Not Found", border_style="red"))
+    except Exception as e:
+        error_msg = f"[red]Error loading auth database:[/]\n{str(e)}\n\n\n\n\n\n\n\n"
+        layout["body"].update(Panel(error_msg, title="Error", border_style="red"))
+
+    layout["help"].update(update_help())
+
+
+def update_fuzzer(layout):
+    """Update fuzzer statistics and configuration page."""
+    cfg = FawkesConfig.load()
+
+    # Check if intelligent fuzzer is enabled
+    fuzzer_type = cfg.get("fuzzer", "file")
+    stats_file = os.path.expanduser(cfg.get("fuzzer_stats_file", "~/.fawkes/fuzzer_stats.json"))
+
+    if fuzzer_type != "intelligent":
+        no_fuzzer_msg = (
+            "[yellow]Intelligent Fuzzer is not enabled[/]\n\n"
+            "Current fuzzer: [cyan]" + fuzzer_type + "[/]\n\n"
+            "To enable the Intelligent Fuzzer:\n"
+            "1. Set 'fuzzer' to 'intelligent' in configuration\n"
+            "2. Optionally configure 'fuzzer_config' path\n"
+            "3. Set 'fuzzer_stats_file' for statistics\n\n"
+            "The Intelligent Fuzzer provides:\n"
+            "  • Crash-guided mutations\n"
+            "  • 17 adaptive mutation strategies\n"
+            "  • Dictionary-based fuzzing\n"
+            "  • Energy scheduling\n"
+            "  • Real-time statistics\n\n\n\n"
+        )
+        layout["body"].update(Panel(no_fuzzer_msg, title="Fuzzer Status", border_style="yellow"))
+        layout["help"].update(update_help())
+        return
+
+    # Try to load fuzzer statistics
+    try:
+        from fuzzers.fuzzer_stats import FuzzerStats
+        from pathlib import Path
+
+        if not Path(stats_file).exists():
+            no_stats_msg = (
+                "[cyan]Intelligent Fuzzer Enabled[/]\n\n"
+                f"Statistics file: [yellow]{stats_file}[/]\n\n"
+                "[yellow]No statistics available yet.[/]\n"
+                "Statistics will appear once fuzzing starts.\n\n"
+                "Start fuzzing to see:\n"
+                "  • Execution speed (exec/sec)\n"
+                "  • Crash statistics\n"
+                "  • Strategy effectiveness\n"
+                "  • Corpus progress\n\n\n\n\n\n"
+            )
+            layout["body"].update(Panel(no_stats_msg, title="Fuzzer Statistics", border_style="cyan"))
+            layout["help"].update(update_help())
+            return
+
+        # Load and display statistics
+        stats = FuzzerStats()
+        stats.load_from_file(stats_file)
+        stats_data = stats.get_stats()
+
+        # Create statistics table
+        stats_table = Table(title="Fuzzing Statistics", border_style="green", show_header=False, box=None)
+        stats_table.add_column("Metric", style="cyan", width=25)
+        stats_table.add_column("Value", style="white", width=20)
+        stats_table.add_column("Metric", style="cyan", width=25)
+        stats_table.add_column("Value", style="white", width=20)
+
+        # Format elapsed time
+        elapsed = int(stats_data.get("elapsed_time", 0))
+        hours, remainder = divmod(elapsed, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        elapsed_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        # Row 1
+        stats_table.add_row(
+            "Elapsed Time",
+            f"[green]{elapsed_str}[/]",
+            "Total Executions",
+            f"[green]{stats_data.get('total_execs', 0):,}[/]"
+        )
+
+        # Row 2
+        stats_table.add_row(
+            "Exec/sec (current)",
+            f"[yellow]{stats_data.get('execs_per_sec_current', 0):.2f}[/]",
+            "Exec/sec (average)",
+            f"[yellow]{stats_data.get('execs_per_sec_avg', 0):.2f}[/]"
+        )
+
+        # Row 3
+        stats_table.add_row(
+            "Crashes Found",
+            f"[red]{stats_data.get('crashes_total', 0)}[/]",
+            "Unique Crashes",
+            f"[red bold]{stats_data.get('crashes_unique', 0)}[/]"
+        )
+
+        # Row 4
+        stats_table.add_row(
+            "Corpus Size",
+            f"[cyan]{stats_data.get('corpus_size', 0)}[/]",
+            "Corpus Progress",
+            f"[cyan]{stats_data.get('corpus_progress', 0):.1f}%[/]"
+        )
+
+        # Create crashes by type table
+        crashes_by_type = stats_data.get("crashes_by_type", {})
+        crash_table = Table(title="Crashes by Type", border_style="red", show_header=True)
+        crash_table.add_column("Type", style="yellow", width=30)
+        crash_table.add_column("Count", style="red", width=10, justify="right")
+
+        if crashes_by_type:
+            for crash_type, count in sorted(crashes_by_type.items(), key=lambda x: -x[1])[:10]:
+                crash_table.add_row(crash_type, str(count))
+        else:
+            crash_table.add_row("No crashes yet", "-")
+
+        # Create top strategies table
+        strategy_rankings = stats.get_strategy_rankings()
+        strategy_table = Table(title="Top Mutation Strategies", border_style="cyan", show_header=True)
+        strategy_table.add_column("Strategy", style="cyan", width=25)
+        strategy_table.add_column("Crash Rate", style="yellow", width=12, justify="right")
+        strategy_table.add_column("Crashes", style="red", width=10, justify="right")
+        strategy_table.add_column("Attempts", style="white", width=10, justify="right")
+
+        if strategy_rankings:
+            for strategy, crash_rate, attempts, crashes in strategy_rankings[:8]:
+                strategy_table.add_row(
+                    strategy,
+                    f"{crash_rate:.2f}%",
+                    str(crashes),
+                    str(attempts)
+                )
+        else:
+            strategy_table.add_row("No strategy data yet", "-", "-", "-")
+
+        # Layout: stats on top, crashes and strategies side by side below
+        top_section = stats_table
+        bottom_section = Columns([crash_table, strategy_table], equal=True, expand=True)
+
+        layout["body"].update(Panel(
+            Group(top_section, "", bottom_section),
+            title="[bold green]Intelligent Fuzzer Statistics[/]",
+            border_style="green"
+        ))
+
+    except FileNotFoundError:
+        error_msg = (
+            f"[red]Statistics file not found:[/] {stats_file}\n\n"
+            "Statistics will be created when fuzzing starts.\n\n\n\n\n\n\n\n"
+        )
+        layout["body"].update(Panel(error_msg, title="Statistics Not Found", border_style="yellow"))
+    except Exception as e:
+        error_msg = f"[red]Error loading fuzzer statistics:[/]\n{str(e)}\n\n\n\n\n\n\n\n"
+        layout["body"].update(Panel(error_msg, title="Error", border_style="red"))
+
+    layout["help"].update(update_help())
+
+def update_login(layout):
+    """Update login screen."""
+    global login_error
+
+    # Create login form
+    login_form = Table.grid(padding=1)
+    login_form.add_column(style="bold cyan", justify="right")
+    login_form.add_column(style="white")
+
+    login_form.add_row("", "")
+    login_form.add_row("", "[bold bright_cyan]FAWKES AUTHENTICATION[/]")
+    login_form.add_row("", "")
+    login_form.add_row("", "")
+
+    if login_error:
+        login_form.add_row("", f"[bold red]{login_error}[/]")
+        login_form.add_row("", "")
+
+    login_form.add_row("Username:", "[Enter username and press Enter]")
+    login_form.add_row("Password:", "[Enter password and press Enter]")
+    login_form.add_row("", "")
+    login_form.add_row("", "[dim]Press Enter to input credentials[/]")
+    login_form.add_row("", "[dim]Press 'q' to quit[/]")
+    login_form.add_row("", "")
+    login_form.add_row("", "")
+
+    # Add padding
+    for _ in range(10):
+        login_form.add_row("", "")
+
+    layout["body"].update(Panel(
+        Align.center(login_form, vertical="middle"),
+        title="Login Required",
+        border_style="bright_cyan"
+    ))
+
 def update_help_screen(layout):
     layout["body"].update(args_help_panel(args_page, args_per_page))
     layout["help"].update(update_help())
 
 def update_header(layout):
-    if current_screen == "help":
+    if current_screen == "login":
+        hdr = f"[bold bright_cyan]FAWKES :: LOGIN[/]\n[yellow]Mode:[/] {mode.upper()}"
+    elif current_screen == "help":
         hdr = f"[bold bright_cyan]FAWKES :: HELP[/]\n[green]Profile:[/] {config_file}    [yellow]Mode:[/] {mode.upper()}"
     elif current_screen == "crashes":
         hdr = f"[bold bright_cyan]FAWKES :: CRASHES[/]\n[green]Profile:[/] {config_file}    [yellow]Mode:[/] {mode.upper()}"
+    elif current_screen == "performance":
+        hdr = f"[bold bright_cyan]FAWKES :: PERFORMANCE METRICS[/]\n[green]Profile:[/] {config_file}    [yellow]Mode:[/] {mode.upper()}"
+    elif current_screen == "snapshots":
+        hdr = f"[bold bright_cyan]FAWKES :: SNAPSHOT MANAGEMENT[/]\n[green]Profile:[/] {config_file}    [yellow]Mode:[/] {mode.upper()}"
+    elif current_screen == "auth":
+        hdr = f"[bold bright_cyan]FAWKES :: AUTHENTICATION & USERS[/]\n[green]Profile:[/] {config_file}    [yellow]Mode:[/] {mode.upper()}"
     else:
         hdr = f"[bold bright_cyan]FAWKES :: CORE CONFIG INTERFACE[/]\n[green]Profile:[/] {config_file}    [yellow]Mode:[/] {mode.upper()}"
+
+    # Add user info if authenticated
+    if is_authenticated and current_user:
+        hdr += f"    [green]User:[/] {current_user.get('username', 'Unknown')}"
+
     layout["header"].update(Panel(Align.center(hdr, vertical="middle"), border_style="bright_blue"))
 
 def update_footer(layout):
-    if current_screen == "help":
+    if current_screen == "login":
+        ftr = "[bold yellow][Enter][/bold yellow] Login  [bold red][Q][/bold red] Quit"
+    elif current_screen == "help":
         ftr = (
             "[bold green][N]/[P][/bold green] Page Nav  "
             "[green][C][/green] Config  "
             "[yellow][D][/yellow] Dashboard  "
             "[cyan][X][/cyan] Crashes  "
-            "[magenta][H][/magenta] Back  "
+            "[blue][F][/blue] Perf  "
+            "[magenta][M][/magenta] Snaps  "
+            "[white][A][/white] Auth  "
+            "[bright_cyan][Z][/bright_cyan] Fuzzer  "
+            "[bright_blue][H][/bright_blue] Back  "
             "[red][E][/red] Exit"
         )
     elif current_screen == "crashes":
         ftr = (
-            "[bold green][↑][↓][/bold green] Select Crash  "
-            "[bold green][1-4][/bold green] Filter HIGH/MED/LOW/UNKNOWN  "
-            "[bold cyan][V][/bold cyan] View Details  "
-            "[bold green][N]/[P][/bold green] Page Nav  "
+            "[bold green][↑][↓][/bold green] Select  "
+            "[bold green][1-4][/bold green] Filter  "
+            "[bold cyan][V][/bold cyan] View  "
+            "[bold green][N]/[P][/bold green] Page  "
             "[green][C][/green] Config  "
             "[yellow][D][/yellow] Dashboard  "
-            "[magenta][H][/magenta] Help  "
+            "[blue][F][/blue] Perf  "
+            "[magenta][M][/magenta] Snaps  "
+            "[white][A][/white] Auth  "
+            "[bright_cyan][Z][/bright_cyan] Fuzzer  "
+            "[bright_blue][H][/bright_blue] Help  "
+            "[red][E][/red] Exit"
+        )
+    elif current_screen == "performance":
+        ftr = (
+            "[green][C][/green] Config  "
+            "[yellow][D][/yellow] Dashboard  "
+            "[cyan][X][/cyan] Crashes  "
+            "[magenta][M][/magenta] Snapshots  "
+            "[white][A][/white] Auth  "
+            "[bright_cyan][Z][/bright_cyan] Fuzzer  "
+            "[bright_blue][H][/bright_blue] Help  "
+            "[red][E][/red] Exit"
+        )
+    elif current_screen == "snapshots":
+        ftr = (
+            "[green][C][/green] Config  "
+            "[yellow][D][/yellow] Dashboard  "
+            "[cyan][X][/cyan] Crashes  "
+            "[blue][F][/blue] Performance  "
+            "[white][A][/white] Auth  "
+            "[bright_cyan][Z][/bright_cyan] Fuzzer  "
+            "[bright_blue][H][/bright_blue] Help  "
+            "[red][E][/red] Exit"
+        )
+    elif current_screen == "auth":
+        ftr = (
+            "[green][C][/green] Config  "
+            "[yellow][D][/yellow] Dashboard  "
+            "[cyan][X][/cyan] Crashes  "
+            "[blue][F][/blue] Performance  "
+            "[magenta][M][/magenta] Snapshots  "
+            "[bright_cyan][Z][/bright_cyan] Fuzzer  "
+            "[bright_blue][H][/bright_blue] Help  "
+            "[red][E][/red] Exit"
+        )
+    elif current_screen == "fuzzer":
+        ftr = (
+            "[green][C][/green] Config  "
+            "[yellow][D][/yellow] Dashboard  "
+            "[cyan][X][/cyan] Crashes  "
+            "[blue][F][/blue] Performance  "
+            "[magenta][M][/magenta] Snapshots  "
+            "[white][A][/white] Auth  "
+            "[bright_blue][H][/bright_blue] Help  "
             "[red][E][/red] Exit"
         )
     else:
@@ -1048,15 +1787,19 @@ def update_footer(layout):
             "[bold green][↑][↓][/bold green] Nav Fields  "
             "[bold green][←][→][/bold green] Nav Sections  "
             "[bold yellow][Enter][/bold yellow] Edit  "
-            "[bold magenta][Space][/bold magenta] Toggle Bool  "
+            "[bold magenta][Space][/bold magenta] Toggle  "
             "[cyan][S][/cyan] Start  "
             "[red][K][/red] Stop  "
             "[yellow][Q][/yellow] Queue  "
             "[bright_black][R] Reset  "
             "[yellow][D][/yellow] Dashboard  "
             "[cyan][X][/cyan] Crashes  "
+            "[blue][F][/blue] Perf  "
+            "[magenta][M][/magenta] Snaps  "
+            "[white][A][/white] Auth  "
+            "[bright_cyan][Z][/bright_cyan] Fuzzer  "
             "[green][C][/green] Config  "
-            "[magenta][H][/magenta] Help  "
+            "[bright_blue][H][/bright_blue] Help  "
             "[red][E][/red] Exit"
         )
     layout["footer"].update(Panel(ftr, border_style="bright_blue"))
@@ -1182,11 +1925,50 @@ def edit_config_field(display_label, config_key):
 def on_press(key):
     global selected_field, current_screen, previous_screen, should_exit, job_page, in_edit_mode, args_page
     global default_config, reset_config, crash_page, selected_crash, crash_filters, in_crash_detail
+    global is_authenticated, current_user, session_token, login_error
     try:
         logger.debug(f"In on_press with key: {key}")
         if in_edit_mode or in_crash_detail:
             if in_crash_detail and key in ('q', '\x1b'):  # Esc or q to close crash details
                 in_crash_detail = False
+            return False
+
+        # Handle login screen
+        if current_screen == "login":
+            if key in ('\r', '\n'):  # Enter key
+                # Perform login
+                restore_tty()
+                console.print("\n[cyan]Username:[/] ", end="")
+                username = input().strip()
+                console.print("[cyan]Password:[/] ", end="")
+                import getpass
+                password = getpass.getpass("")
+                setup_tty()
+
+                # Authenticate
+                cfg = FawkesConfig.load()
+                auth_db_path = os.path.expanduser(cfg.get("auth_db_path", "~/.fawkes/auth.db"))
+                try:
+                    from db.auth_db import AuthDB
+                    auth_db = AuthDB(auth_db_path)
+                    user_info = auth_db.authenticate_user(username, password)
+                    auth_db.close()
+
+                    if user_info:
+                        is_authenticated = True
+                        current_user = user_info
+                        session_token = None  # TODO: implement session tokens if needed
+                        login_error = None
+                        current_screen = "configuration"
+                        logger.info(f"User {username} logged in successfully")
+                    else:
+                        login_error = "Invalid username or password"
+                        logger.warning(f"Failed login attempt for user: {username}")
+                except Exception as e:
+                    login_error = f"Authentication error: {str(e)}"
+                    logger.error(f"Login error: {e}")
+            elif key in ('q', 'Q'):
+                should_exit = True
             return False
 
         if current_screen == "configuration":
@@ -1339,6 +2121,22 @@ def on_press(key):
             crash_page = 0
             selected_crash = 0
             in_crash_detail = False
+        elif ch == 'f':
+            previous_screen = current_screen
+            current_screen = "performance"
+            args_page = 0
+        elif ch == 'm':
+            previous_screen = current_screen
+            current_screen = "snapshots"
+            args_page = 0
+        elif ch == 'a':
+            previous_screen = current_screen
+            current_screen = "auth"
+            args_page = 0
+        elif ch == 'z':
+            previous_screen = current_screen
+            current_screen = "fuzzer"
+            args_page = 0
         elif ch == 'e':
             should_exit = True
     except Exception as ex:
@@ -1370,38 +2168,91 @@ def poll_for_keypress():
 
 def main():
     logger.debug("Starting fawkes system TUI")
-    global console
+    global console, current_screen, is_authenticated
     setup_tty()
+
+    # Check if authentication is required
+    cfg = FawkesConfig.load()
+    auth_enabled = cfg.get("auth_enabled", False)
+
+    if auth_enabled and not is_authenticated:
+        current_screen = "login"
+        logger.info("Authentication required - showing login screen")
+    else:
+        is_authenticated = True  # No auth required or already authenticated
+        logger.info("Authentication not required or already authenticated")
+
+    # Track when to refresh screen
+    last_screen = current_screen
+    refresh_counter = 0
+    refresh_interval = 5  # Refresh every 5 iterations (0.5 seconds)
+    needs_refresh = True
+
     with console.screen():
         while not should_exit:
             layout = layouts[current_screen]
-            update_header(layout)
-            update_footer(layout)
+
+            # Check if screen changed
+            if current_screen != last_screen:
+                needs_refresh = True
+                last_screen = current_screen
+                refresh_counter = 0
+
+            # Poll for input (this is fast)
             key = poll_for_keypress()
             if key:
                 try:
                     on_press(key)
+                    needs_refresh = True  # Refresh on user input
                 except Exception as e:
                     logger.error(f"An Exception occurred calling on_press: {e}")
+
             if in_edit_mode:
                 logger.debug("in_edit_mode set by the user pressing enter")
                 termios.tcflush(sys.stdin, termios.TCIOFLUSH)
                 _, cfg_key, lbl = fields[selected_field]
                 edit_config_field(lbl, cfg_key)
-            if current_screen == "configuration":
-                layout = layouts["configuration"]
-                update_config_body(layout)
-                layout["help"].update(update_help())
-            elif current_screen == "dashboard":
-                layout = layouts["dashboard"]
-                update_dashboard(layout)
-            elif current_screen == "help":
-                layout = layouts["help"]
-                update_help_screen(layout)
-            elif current_screen == "crashes":
-                layout = layouts["crashes"]
-                update_crashes(layout)
-            console.print(layout)
+                needs_refresh = True
+
+            # Only update screen content periodically or when needed
+            refresh_counter += 1
+            if needs_refresh or refresh_counter >= refresh_interval:
+                update_header(layout)
+                update_footer(layout)
+
+                if current_screen == "configuration":
+                    layout = layouts["configuration"]
+                    update_config_body(layout)
+                    layout["help"].update(update_help())
+                elif current_screen == "dashboard":
+                    layout = layouts["dashboard"]
+                    update_dashboard(layout)
+                elif current_screen == "help":
+                    layout = layouts["help"]
+                    update_help_screen(layout)
+                elif current_screen == "crashes":
+                    layout = layouts["crashes"]
+                    update_crashes(layout)
+                elif current_screen == "performance":
+                    layout = layouts["performance"]
+                    update_performance(layout)
+                elif current_screen == "snapshots":
+                    layout = layouts["snapshots"]
+                    update_snapshots(layout)
+                elif current_screen == "auth":
+                    layout = layouts["auth"]
+                    update_auth(layout)
+                elif current_screen == "fuzzer":
+                    layout = layouts["fuzzer"]
+                    update_fuzzer(layout)
+                elif current_screen == "login":
+                    layout = layouts["login"]
+                    update_login(layout)
+
+                console.print(layout)
+                refresh_counter = 0
+                needs_refresh = False
+
             time.sleep(0.1)
     restore_tty()
     termios.tcflush(sys.stdin, termios.TCIOFLUSH)

@@ -1,0 +1,31 @@
+{
+  "_comment": "Configuration for IntelligentFuzzer - Crash-Guided Adaptive Fuzzer",
+
+  "mutations_per_seed": 1000,
+  "output_dir": "~/fawkes/testcases",
+
+  "network_mode": false,
+  "packets_per_conversation": 1,
+
+  "max_mutation_size": 1048576,
+
+  "use_format_specs": true,
+
+  "strategies": {
+    "_comment": "Initial weights for mutation strategies (auto-adjusted based on crash feedback)",
+    "bit_flip_1": 1.0,
+    "byte_flip_1": 1.5,
+    "arith_add": 2.0,
+    "interesting_32": 2.5,
+    "block_insert": 2.0,
+    "havoc": 3.0,
+    "splice": 2.0
+  },
+
+  "crash_feedback": {
+    "enabled": true,
+    "analyze_last_n_crashes": 100,
+    "boost_successful_strategies": true,
+    "extract_magic_values": true
+  }
+}

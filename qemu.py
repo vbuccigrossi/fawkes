@@ -7,11 +7,19 @@ import shutil
 import subprocess
 import tempfile
 import time
+import io
 from pathlib import Path
 from typing import Optional, Dict, Any
 from config import FawkesConfig, VMRegistry
 from arch.architectures import SupportedArchitectures
 from fawkes.performance import perf_tracker
+
+# Screenshot format conversion (optional - PIL provides better compression)
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 
 def pick_free_port():
     import socket
@@ -105,23 +113,54 @@ class QemuManager:
             cmd += ["-net", f"user,smb={share_dir},hostfwd=tcp::{agent_port}-:9999", "-net", "nic"]
             self.logger.debug(f"No share method specified, defaulting to SMB at {share_dir} with agent port {agent_port}")
     
-        if not self.config.get("no_headless", False):
+        # Display configuration
+        vnc_port = None
+        if self.config.get("enable_vm_screenshots", False):
+            # Use VNC display for screenshots (headless VNC - no window needed on host)
+            vnc_port = pick_free_port()
+            vnc_display = vnc_port - 5900  # VNC display number (port 5900 + display)
+            if vnc_display < 0:
+                vnc_display = 0
+                vnc_port = 5900
+            cmd += ["-vnc", f"127.0.0.1:{vnc_display}"]
+            self.logger.debug(f"VNC display enabled for screenshots on port {vnc_port}")
+        elif not self.config.get("no_headless", False):
             cmd += ["-nographic"]
 
         debug_port = None
         monitor_port = None
+
+        # Enable monitor port for debug mode OR screenshot mode
+        needs_monitor = debug or self.config.get("enable_vm_screenshots", False)
+        if needs_monitor:
+            monitor_port = pick_free_port()
+            cmd += ["-monitor", f"tcp:127.0.0.1:{monitor_port},server,nowait"]
+            self.logger.debug(f"QEMU monitor enabled on port {monitor_port}")
+
         if debug:
             debug_port = pick_free_port()
-            monitor_port = pick_free_port()  # Add monitor port for VM control
             cmd += ["-gdb", f"tcp::{debug_port}"]
-            # Add QEMU monitor on TCP for programmatic control
-            cmd += ["-monitor", f"tcp:127.0.0.1:{monitor_port},server,nowait"]
             if pause_on_start:
                 cmd.append("-S")
 
         vm_params = self.config.get("vm_params", False)
         if vm_params:
             cmd.extend(vm_params.split())
+
+        # Time compression via QEMU icount mode
+        if self.config.get("enable_time_compression", False):
+            shift = self.config.get("time_compression_shift", "auto")
+            skip_idle = self.config.get("skip_idle_loops", True)
+
+            # Build icount options
+            icount_opts = f"shift={shift}"
+            if skip_idle:
+                icount_opts += ",align=off,sleep=off"
+
+            cmd.extend(["-icount", icount_opts])
+            cmd.extend(["-rtc", "clock=vm"])
+
+            self.logger.info(f"Time compression enabled: icount={icount_opts}, rtc=vm (expected 3-10x speedup)")
 
         self.logger.debug(f"Starting QEMU with command: {' '.join(cmd)}")
         try:
@@ -154,13 +193,15 @@ class QemuManager:
                 "debug": debug,
                 "debug_port": debug_port,
                 "monitor_port": monitor_port,
+                "vnc_port": vnc_port,
                 "agent_port": agent_port,
                 "extra_opts": extra_opts or "",
                 "status": "Running",
                 "share_dir": share_dir,
                 "arch": arch,
                 "temp_dir": str(temp_dir),
-                "snapshot_name": snapshot_name
+                "snapshot_name": snapshot_name,
+                "screenshots_enabled": self.config.get("enable_vm_screenshots", False)
             }
             try:
                 vm_id = self.registry.add_vm(vm_data)
@@ -406,4 +447,134 @@ class QemuManager:
             logger.info(f"[FAWKES] Found snapshots on image: {ret.stdout}")
         else:
             self.logger.error(f"[FAWKES] Error listing snapshots: {ret.stderr}")
+
+    # Screenshot functionality for web UI
+    def capture_screenshot(self, vm_id: int, output_path: str = None) -> Optional[bytes]:
+        """
+        Capture a screenshot from a running VM using QEMU monitor's screendump command.
+
+        Args:
+            vm_id: VM identifier
+            output_path: Optional path to save the screenshot (if None, returns bytes)
+
+        Returns:
+            Screenshot as PNG bytes if output_path is None, else None (saves to file)
+        """
+        vm_info = self.registry.get_vm(vm_id)
+        if not vm_info:
+            self.logger.error(f"VM {vm_id} not found")
+            return None
+
+        if vm_info.get("status") != "Running":
+            self.logger.debug(f"VM {vm_id} is not running, cannot capture screenshot")
+            return None
+
+        monitor_port = vm_info.get("monitor_port")
+        if not monitor_port:
+            self.logger.debug(f"VM {vm_id} has no monitor port, screenshots not available")
+            return None
+
+        # Create temp file for screendump
+        screenshot_dir = os.path.expanduser(self.config.get("screenshot_dir", "~/.fawkes/screenshots"))
+        os.makedirs(screenshot_dir, exist_ok=True)
+        temp_ppm = os.path.join(screenshot_dir, f"vm_{vm_id}_temp.ppm")
+
+        try:
+            # Connect to QEMU monitor
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+            sock.connect(('127.0.0.1', monitor_port))
+
+            # Read QEMU monitor banner
+            banner = sock.recv(4096).decode('utf-8', errors='ignore')
+            self.logger.debug(f"Monitor connected for screenshot (VM {vm_id})")
+
+            # Send screendump command
+            screendump_cmd = f"screendump {temp_ppm}\n"
+            sock.sendall(screendump_cmd.encode())
+            time.sleep(0.3)  # Give time for screenshot to be written
+
+            # Read response
+            response = sock.recv(4096).decode('utf-8', errors='ignore')
+            sock.close()
+
+            # Check if file was created
+            if not os.path.exists(temp_ppm):
+                self.logger.error(f"Screendump failed for VM {vm_id}: file not created")
+                return None
+
+            # Convert PPM to PNG
+            png_bytes = self._convert_ppm_to_png(temp_ppm)
+
+            # Clean up temp file
+            try:
+                os.remove(temp_ppm)
+            except OSError:
+                pass
+
+            if output_path:
+                with open(output_path, 'wb') as f:
+                    f.write(png_bytes)
+                self.logger.debug(f"Screenshot saved to {output_path}")
+                return None
+            else:
+                return png_bytes
+
+        except socket.timeout:
+            self.logger.error(f"Timeout connecting to QEMU monitor for VM {vm_id}")
+            return None
+        except socket.error as e:
+            self.logger.error(f"Socket error capturing screenshot for VM {vm_id}: {e}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Error capturing screenshot for VM {vm_id}: {e}", exc_info=True)
+            return None
+
+    def _convert_ppm_to_png(self, ppm_path: str) -> bytes:
+        """
+        Convert PPM file to PNG bytes.
+
+        Uses PIL if available for better compression, otherwise uses basic conversion.
+        """
+        if HAS_PIL:
+            # Use PIL for conversion (better quality and compression)
+            with Image.open(ppm_path) as img:
+                buffer = io.BytesIO()
+                img.save(buffer, format='PNG', optimize=True)
+                return buffer.getvalue()
+        else:
+            # Fallback: Read PPM and return raw (or use subprocess convert if available)
+            try:
+                # Try using ImageMagick's convert if available
+                result = subprocess.run(
+                    ['convert', ppm_path, 'png:-'],
+                    capture_output=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    return result.stdout
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+
+            # Last resort: return raw PPM data (browser won't display it)
+            self.logger.warning("Neither PIL nor ImageMagick available for PNG conversion")
+            with open(ppm_path, 'rb') as f:
+                return f.read()
+
+    def get_all_vm_screenshots(self) -> Dict[int, bytes]:
+        """
+        Capture screenshots from all running VMs.
+
+        Returns:
+            Dict mapping vm_id to PNG bytes
+        """
+        screenshots = {}
+        for vm_id, vm_info in self.registry.vms.items():
+            if not isinstance(vm_info, dict):
+                continue
+            if vm_info.get("status") == "Running" and vm_info.get("screenshots_enabled"):
+                screenshot = self.capture_screenshot(vm_id)
+                if screenshot:
+                    screenshots[vm_id] = screenshot
+        return screenshots
 
