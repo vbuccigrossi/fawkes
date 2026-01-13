@@ -6,6 +6,11 @@ Fawkes is a powerful, snapshot-based fuzzing framework that leverages QEMU virtu
 
 ---
 
+
+<img width="1101" height="667" alt="Screen Shot 2026-01-13 at 4 02 49 PM" src="https://github.com/user-attachments/assets/6b1260a5-23a6-4df7-a524-9417d7a44990" />
+
+---
+
 ## Features
 
 - **Snapshot-based Fuzzing** - Fast iteration using QEMU VM snapshots
@@ -18,6 +23,11 @@ Fawkes is a powerful, snapshot-based fuzzing framework that leverages QEMU virtu
 - **Differential Fuzzing** - Compare behavior across different versions/implementations
 - **Real-time Monitoring** - TUI and Web UI for live fuzzing statistics
 - **Cross-Platform Agents** - Windows and Linux guest agents for crash detection
+
+---
+
+
+<img width="1666" height="838" alt="Screen Shot 2026-01-13 at 4 03 06 PM" src="https://github.com/user-attachments/assets/f988076a-f4dc-4d19-9043-76a3a5690047" />
 
 ---
 
